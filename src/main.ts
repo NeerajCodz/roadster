@@ -7,6 +7,7 @@ import { Simulation, EMPTY_CONTROLS, type Controls } from './game/simulation';
 import { GameRenderer } from './game/renderer';
 import { GameAudio } from './game/audio';
 import { CONTROL_CODES, keyAction } from './game/keyboard';
+import { GestureInput } from './game/gestures';
 
 const icons: Record<string, string> = {
   arrow: '<path d="M5 19 19 5M5 5h14v14"/>',
@@ -125,6 +126,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <div class="hud-score"><span class="micro-label">SCORE</span><strong id="score">000000</strong><div><span id="distance">0.00 KM</span><span class="hud-bolts">${icon('bolt')}<b id="bolts">0</b></span></div></div>
     <div class="route-tag"><span class="status-dot"></span><span>PACIFIC COAST</span><b>NORTHBOUND / ∞</b></div>
     <div class="combo-display" id="combo-display"><span class="micro-label">MULTIPLIER</span><strong id="combo">×1</strong><div class="combo-track"><i id="combo-fill"></i></div></div>
+    <div class="roll-status"><span class="micro-label">BARREL ROLL</span><strong id="roll-ready">READY</strong><div class="combo-track"><i id="roll-fill"></i></div></div>
     <div class="event-toast" id="event-toast" role="status"></div>
     <div class="pickup-effects" id="pickup-effects"></div>
     <div class="bottom-hud"><div class="speed-display"><strong id="speed">158</strong><div><span>KM/H</span><b id="drive-mode">ELECTRIC DRIVE</b></div><div class="speed-bars">${'<i></i>'.repeat(16)}</div></div><div class="air-display"><div><span>${icon('up')} THRUSTER ENERGY</span><strong id="air-number">100<span>%</span></strong></div><div class="air-track"><i id="air-fill"></i></div><p><kbd>SPACE</kbd> HOLD TO FLY <span id="altitude">GROUND LEVEL</span></p></div></div>
@@ -141,6 +143,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <button class="dialog-close icon-button" aria-label="Close how to play">${icon('close')}</button>
     <div class="eyebrow">DRIVER’S MANUAL / 01</div><h2>NO TRAFFIC.<br><em>JUST POSSIBILITIES.</em></h2><p class="dialog-intro">Go further. Get closer. Take the scenic route above it all.</p>
     <div class="manual-grid"><div><span>01</span><h3>FIND YOUR LINE</h3><p>Use <kbd>A</kbd> <kbd>D</kbd> or arrow keys to move between five lanes. Hold <kbd>W</kbd> or <kbd>SHIFT</kbd> for a boost.</p></div><div><span>02</span><h3>LEAVE THE ROAD</h3><p>Tap <kbd>SPACE</kbd> to hop. Hold it to fly. Release to descend, or hold <kbd>S</kbd> to dive. Energy refills on the ground.</p></div><div><span>03</span><h3>MAKE IT A CLOSE CALL</h3><p><kbd>Q</kbd> <kbd>E</kbd> barrel roll through danger. Chain near misses and collect bolts to build your score.</p></div><div><span>04</span><h3>GO THE EXTRA MILE</h3><p>Collect air, shields, magnets, double points and rockets. Sky traffic is real—keep watching ahead.</p></div></div>
+    <p class="gesture-help">ON TOUCH: swipe to steer, hold the scene to fly, swipe down to dive, and double-tap to barrel roll. The on-screen buttons work together, too.</p>
     <div class="manual-note"><span>${icon('shield')} ROLL = BRIEF COLLISION PROTECTION</span><span><kbd>ESC</kbd> PAUSE &nbsp; <kbd>M</kbd> SOUND</span></div>
     <button class="primary-button dialog-close"><span>GOT IT. LET’S GO.</span>${icon('arrow')}</button>
   </dialog>
@@ -184,15 +187,35 @@ voice.volume = 0.42;
 voice.preload = 'none';
 let lastVoice = 0,
   lowAirAnnounced = false;
+let audioStarted = false;
+let currentTrack: 'title' | 'run' | 'rocket' = 'run';
+let peakCombo = 1;
+const voiceUses = new Map<string, number>();
+function unlockAudio() {
+  audioStarted = true;
+  void audio.unlock();
+}
+function track(name: typeof currentTrack, reset = false) {
+  if (currentTrack !== name) {
+    currentTrack = name;
+    music.src = assetPath(`music/${name}.mp3`);
+  }
+  if (reset) music.currentTime = 0;
+  if (prefs.sound && audioStarted) void music.play().catch(() => {});
+}
 const speak = (name: string, force = false) => {
   if (!prefs.sound || (!force && performance.now() - lastVoice < 5500)) return;
   lastVoice = performance.now();
-  voice.src = assetPath(`voice/${name}_0.mp3`);
+  const count = ['start', 'closeCall', 'combo', 'roll', 'crash'].includes(name) ? 2 : 1;
+  const use = voiceUses.get(name) ?? 0;
+  voiceUses.set(name, use + 1);
+  voice.src = assetPath(`voice/${name}_${use % count}.mp3`);
   void voice.play().catch(() => {});
 };
 
 const keys = new Set<string>();
 const pointers = new Map<number, keyof Controls>();
+const gestures = new GestureInput();
 let panel: 'drive' | 'garage' = 'drive';
 let lastStatus = sim.state.status;
 let toastUntil = 0;
@@ -200,6 +223,7 @@ let resultTimeout: ReturnType<typeof setTimeout> | undefined;
 const clearInput = () => {
   keys.clear();
   pointers.clear();
+  gestures.reset();
   document.querySelectorAll('.pressed').forEach((el) => el.classList.remove('pressed'));
 };
 const anyDialog = () => document.querySelector('dialog[open]') !== null;
@@ -258,8 +282,10 @@ function setSound(enabled: boolean) {
     music.pause();
     voice.pause();
   } else if (sim.state.status === 'playing') {
-    void audio.unlock();
-    void music.play().catch(() => {});
+    unlockAudio();
+    track(sim.state.rocket > 0 ? 'rocket' : 'run');
+  } else if (sim.state.status === 'menu' && audioStarted) {
+    track('title');
   }
 }
 function startRun() {
@@ -269,15 +295,15 @@ function startRun() {
   sim.start();
   lastStatus = 'playing';
   lowAirAnnounced = false;
+  peakCombo = 1;
   document.body.dataset.mode = 'playing';
   $('#hud').hidden = false;
   $('#touch-controls').hidden = false;
   $('#scene').focus({ preventScroll: true });
-  void audio.unlock();
+  unlockAudio();
   audio.play('start');
   if (prefs.sound) {
-    music.currentTime = 0;
-    void music.play().catch(() => {});
+    track('run', true);
     speak('start', true);
   }
   toast('MAKE THE ROAD YOURS', 'PACIFIC COAST / NORTHBOUND');
@@ -305,6 +331,7 @@ function goHome() {
   lastStatus = 'menu';
   music.pause();
   voice.pause();
+  if (prefs.sound && audioStarted) track('title');
   document.body.dataset.mode = 'menu';
   $('#hud').hidden = true;
   $('#touch-controls').hidden = true;
@@ -349,7 +376,7 @@ function crash() {
   $('#result-distance').innerHTML = `${(s.distance / 1000).toFixed(2)} <small>KM</small>`;
   $('#result-bolts').textContent = String(s.bolts);
   $('#result-near').textContent = String(s.nearMisses);
-  $('#result-best').textContent = `PERSONAL BEST ${number(prefs.bestScore)} PTS`;
+  $('#result-best').textContent = `BEST ${number(prefs.bestScore)} PTS / PEAK CHAIN ×${peakCombo}`;
   resultTimeout = setTimeout(() => {
     if (sim.state.status === 'crashed') $<HTMLDialogElement>('#results-dialog').showModal();
   }, 700);
@@ -368,11 +395,11 @@ $('#brand').addEventListener('click', () => {
   else if (sim.state.status === 'menu') setPanel('drive');
 });
 $('#sound').addEventListener('click', () => {
-  void audio.unlock();
+  unlockAudio();
   setSound(!prefs.sound);
 });
 $('#sound-setting').addEventListener('click', () => {
-  void audio.unlock();
+  unlockAudio();
   setSound(!prefs.sound);
 });
 $('#settings').addEventListener('click', () => showDialog('settings'));
@@ -444,7 +471,7 @@ window.addEventListener('keydown', (event) => {
   if (event.repeat) return;
   switch (action) {
     case 'mute':
-      void audio.unlock();
+      unlockAudio();
       setSound(!prefs.sound);
       break;
     case 'start':
@@ -480,6 +507,21 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('resize', () => scene.resize());
 
+const canvas = $<HTMLCanvasElement>('#scene');
+canvas.addEventListener('pointerdown', (event) => {
+  if (event.pointerType !== 'touch' || sim.state.status !== 'playing') return;
+  event.preventDefault();
+  canvas.setPointerCapture(event.pointerId);
+  gestures.begin(event.pointerId, event.clientX, event.clientY, performance.now());
+});
+canvas.addEventListener('pointermove', (event) => {
+  if (event.pointerType !== 'touch') return;
+  gestures.move(event.pointerId, event.clientX, event.clientY, performance.now());
+});
+canvas.addEventListener('pointerup', (event) => gestures.end(event.pointerId, performance.now()));
+canvas.addEventListener('pointercancel', (event) => gestures.cancel(event.pointerId));
+canvas.addEventListener('lostpointercapture', (event) => gestures.cancel(event.pointerId));
+
 document.querySelectorAll<HTMLButtonElement>('[data-control]').forEach((button) => {
   button.addEventListener('pointerdown', (event) => {
     if (sim.state.status !== 'playing') return;
@@ -502,6 +544,9 @@ function controls(): Controls {
   const result = { ...EMPTY_CONTROLS };
   for (const key of keys) if (controlCodes[key]) result[controlCodes[key]] = true;
   for (const control of pointers.values()) result[control] = true;
+  for (const [action, active] of Object.entries(gestures.read(performance.now()))) {
+    if (active) result[action as keyof Controls] = true;
+  }
   return result;
 }
 const hud = {
@@ -517,6 +562,8 @@ const hud = {
   airNumber: $('#air-number'),
   altitude: $('#altitude'),
   effects: $('#pickup-effects'),
+  rollReady: $('#roll-ready'),
+  rollFill: $('#roll-fill'),
 };
 let lastFrame = performance.now(),
   lastHud = 0,
@@ -527,8 +574,14 @@ function frame(now: number) {
   sim.update(dt, controls());
   const s = sim.state;
   if (s.status === 'playing') {
+    peakCombo = Math.max(peakCombo, s.combo * (s.double > 0 ? 2 : 1));
+    const desiredTrack = s.rocket > 0 ? 'rocket' : 'run';
+    if (desiredTrack !== currentTrack) track(desiredTrack);
     for (const event of s.events) {
-      if (event.type === 'pickup') audio.play(event.label?.includes('BOLT') ? 'bolt' : 'pickup');
+      if (event.type === 'pickup') {
+        audio.play(event.label?.includes('BOLT') ? 'bolt' : 'pickup');
+        if (event.label?.includes('ROCKET')) speak('rocket', true);
+      }
       if (event.type === 'roll') {
         audio.play('roll');
         speak('roll');
@@ -538,6 +591,12 @@ function frame(now: number) {
         speak('closeCall');
       }
       if (event.type === 'shield') audio.play('pickup');
+      if (event.type === 'milestone') {
+        audio.play('pickup');
+        speak('milestone', true);
+      }
+      if (event.type === 'combo') speak('combo');
+      if (event.type === 'big-air') speak('sky');
       if (event.label && !event.label.includes('BOLT')) toast(event.label);
     }
     if (s.air < 18 && !lowAirAnnounced) {
@@ -569,6 +628,13 @@ function frame(now: number) {
     hud.air.style.transform = `scaleX(${s.air / 100})`;
     hud.air.classList.toggle('low', s.air < 20);
     hud.airNumber.innerHTML = `${Math.ceil(s.air)}<span>%</span>`;
+    hud.rollReady.textContent =
+      s.air < 8 ? 'LOW AIR' : s.rollCooldown > 0 ? `${s.rollCooldown.toFixed(1)}s` : 'READY';
+    hud.rollFill.style.transform = `scaleX(${s.air < 8 ? 0 : 1 - Math.min(1, s.rollCooldown / 1.7)})`;
+    for (const button of document.querySelectorAll<HTMLElement>(
+      '[data-control="rollLeft"],[data-control="rollRight"]',
+    ))
+      button.classList.toggle('cooling', s.rollCooldown > 0 || s.air < 8);
     hud.altitude.textContent = s.y > 0.5 ? `${s.y.toFixed(1)} M ALTITUDE` : 'GROUND LEVEL';
     const speedAmount = Math.floor((s.speed / 86) * 16);
     document

@@ -2159,3 +2159,52 @@ select {
     bottom: 11.5%;
   }
 }
+#scene {
+  touch-action: none;
+}
+.roll-status {
+  position: absolute;
+  right: 4.2%;
+  top: 216px;
+  width: 105px;
+  text-align: right;
+}
+.roll-status strong {
+  display: block;
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 1.5px;
+  color: var(--volt);
+  margin-top: 8px;
+}
+.roll-status .combo-track {
+  margin-top: 10px;
+}
+.touch-controls button.cooling {
+  opacity: 0.4;
+}
+@media (max-width: 650px) {
+  .roll-status {
+    right: 5%;
+    top: 181px;
+    width: 75px;
+  }
+  .roll-status .micro-label {
+    font-size: 5px;
+  }
+  .roll-status strong {
+    font-size: 7px;
+  }
+}
+.gesture-help {
+  font-size: 9px !important;
+  margin-top: 24px;
+  border-left: 2px solid var(--volt);
+  padding-left: 13px;
+}
+@media (max-width: 650px) {
+  .start-hint {
+    display: none;
+  }
+}
