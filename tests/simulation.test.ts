@@ -487,3 +487,307 @@ test('generated roads include all traffic styles and aerial hazards with open la
   assert.equal(variants.size, 9);
   assert.ok(aerialBarrier, 'flight has an overhead hazard to avoid');
 });
+
+test('rolls score a trick and extend the chain once per accepted input', () => {
+  const game = playing();
+  game.state.y = 5;
+  game.update(1 / 60, controls({ rollRight: true }));
+  assert.equal(game.state.combo, 2);
+  assert.ok(game.state.score >= 150);
+  assert.equal(game.state.events.filter((event) => event.type === 'roll').length, 1);
+  const prior = game.state.score;
+  game.update(1 / 60, controls());
+  game.update(1 / 60, controls({ rollLeft: true }));
+  assert.equal(game.state.combo, 2);
+  assert.ok(game.state.score - prior < 5, 'cooldown cannot farm trick points');
+  advance(game, 0.5, controls({ rollLeft: true }));
+  assert.equal(game.state.combo, 2);
+});
+
+test('big air awards one trick per flight and landing permits another', () => {
+  const game = playing();
+  let bigAir = 0;
+  const fly = () => {
+    for (let i = 0; i < 180; i++) {
+      game.state.entities = [];
+      game.update(1 / 60, controls({ fly: true }));
+      bigAir += game.state.events.filter((event) => event.type === 'big-air').length;
+    }
+  };
+  fly();
+  assert.equal(bigAir, 1);
+  assert.equal(game.state.combo, 2);
+  advance(game, 4);
+  assert.equal(game.state.y, 0);
+  fly();
+  assert.equal(bigAir, 2);
+});
+
+test('roof riding grows the trick chain once for the same vehicle', () => {
+  const game = playing();
+  game.state.y = 1.55;
+  game.state.vy = -5;
+  game.state.entities = [obstacle({ z: -0.6 })];
+  game.update(1 / 30, controls());
+  assert.equal(game.state.combo, 2);
+  const before = game.state.score;
+  game.update(1 / 60, controls());
+  assert.equal(game.state.combo, 2);
+  assert.ok(game.state.score - before < 5);
+});
+
+test('kilometre milestones fire once at each crossing and reset on retry', () => {
+  const game = playing();
+  const labels: string[] = [];
+  const cross = () => {
+    for (let i = 0; i < 12; i++) {
+      game.state.entities = [];
+      game.update(1 / 60, controls());
+      labels.push(...game.state.events.filter((e) => e.type === 'milestone').map((e) => e.label!));
+    }
+  };
+  game.state.distance = 999;
+  cross();
+  assert.deepEqual(labels, ['1 KM MILESTONE']);
+  game.state.distance = 1999;
+  cross();
+  assert.deepEqual(labels, ['1 KM MILESTONE', '2 KM MILESTONE']);
+  game.start();
+  game.state.distance = 999;
+  cross();
+  assert.equal(labels.filter((label) => label === '1 KM MILESTONE').length, 2);
+});
+
+test('traffic warns for a full second before a distant deterministic lane change', () => {
+  const first = playing();
+  const second = playing();
+  for (const game of [first, second]) game.state.entities = [obstacle({ id: 6, z: -280 })];
+  let signalAt: number | undefined;
+  let moved = false;
+  let sawBrakes = false;
+  for (let i = 0; i < 480; i++) {
+    for (const game of [first, second]) game.update(1 / 120, controls());
+    const entity = first.state.entities[0];
+    if (entity.signal && signalAt === undefined) signalAt = first.state.time;
+    sawBrakes ||= Boolean(entity.braking);
+    if (entity.x !== 0 && !moved) {
+      assert.ok(signalAt !== undefined);
+      assert.ok(first.state.time - signalAt >= 1 - 1e-8);
+      assert.ok(entity.z < -75);
+      moved = true;
+    }
+    assert.deepEqual(first.state, second.state);
+  }
+  assert.ok(moved, 'traffic should make an announced lane change on a clear road');
+  assert.ok(sawBrakes, 'traffic should expose a bounded braking phase');
+});
+
+test('a newly blocked destination cancels a traffic signal without a close lane swap', () => {
+  const game = playing();
+  game.state.entities = [obstacle({ id: 6, z: -280 })];
+  let destination: number | undefined;
+  for (let i = 0; i < 240 && destination === undefined; i++) {
+    game.update(1 / 120, controls());
+    destination = game.state.entities[0].targetLane;
+  }
+  assert.notEqual(destination, undefined);
+  const leader = game.state.entities[0];
+  game.state.entities.push(
+    obstacle({ id: 7, x: destination! * 3.6, lane: destination!, z: leader.z, variant: 0 }),
+  );
+  advance(game, 1.2, controls(), false);
+  assert.equal(leader.x, 0);
+  assert.equal(leader.targetLane, undefined);
+  assert.equal(leader.signal, 0);
+  const close = playing();
+  close.state.entities = [obstacle({ z: -70, x: -7.2, lane: -2 })];
+  advance(close, 1, controls(), false);
+  assert.equal(close.state.entities[0].x, -7.2);
+  assert.ok(!close.state.entities[0].signal);
+});
+
+test('retry clears pending traffic maneuvers and trick state', () => {
+  const game = playing();
+  game.state.entities = [obstacle({ id: 6, z: -280 })];
+  for (let i = 0; i < 180 && !game.state.entities[0].signal; i++) game.update(1 / 120, controls());
+  assert.ok(game.state.entities[0].signal);
+  game.start();
+  game.update(1 / 120, controls());
+  const opening = game.state.entities.find((entity) => entity.id === 6)!;
+  assert.equal(opening.targetLane, undefined);
+  assert.ok(!opening.signal);
+  assert.equal(opening.x, -3.6);
+  assert.equal(game.state.combo, 1);
+});
+
+test('later aerial formations provide paired altitudes and a clear rising/falling bolt route', () => {
+  const game = new Simulation(321);
+  game.start();
+  game.state.invincible = 1000;
+  let found = false;
+  let oldId = Math.max(...game.state.entities.map((entity) => entity.id));
+  for (let i = 0; i < 3600 && !found; i++) {
+    game.update(1 / 60, controls());
+    const added = game.state.entities.filter((entity) => entity.id > oldId);
+    oldId = Math.max(oldId, ...added.map((entity) => entity.id));
+    const arc = added
+      .filter((entity) => entity.kind === 'pickup' && entity.pickup === 'bolt')
+      .sort((a, b) => b.z - a.z);
+    if (arc.length >= 7 && arc.some((entity) => entity.y > 5)) {
+      assert.ok(arc[0].y < 2 && arc[arc.length - 1].y < 2);
+      assert.ok(arc[Math.floor(arc.length / 2)].y > 5);
+      assert.equal(new Set(arc.map((entity) => entity.lane)).size, 1);
+      assert.ok(added.filter((entity) => entity.kind === 'traffic' && entity.y > 6).length >= 2);
+      assert.ok(
+        added
+          .filter((entity) => entity.kind === 'traffic' || entity.kind === 'barrier')
+          .every((entity) => entity.lane !== arc[0].lane),
+      );
+      found = true;
+    }
+  }
+  assert.ok(found, 'a later wave should deliberately introduce an aerial route');
+});
+
+test('an unexpected rocket boost cannot bring a traffic lane change close to the player', () => {
+  const game = playing();
+  game.state.entities = [obstacle({ id: 6, z: -150 })];
+  let started = false;
+  let warned = false;
+  let finished = false;
+  for (let i = 0; i < 480; i++) {
+    game.update(1 / 120, controls());
+    const entity = game.state.entities[0];
+    warned ||= Boolean(entity.signal);
+    if (entity.x !== 0 && !started) {
+      started = true;
+      game.state.rocket = 5;
+      game.state.invincible = 6;
+    }
+    if (started && entity.targetLane === undefined) {
+      assert.ok(
+        entity.z < -35,
+        'a completed maneuver leaves reaction distance even after a sudden boost',
+      );
+      finished = true;
+      break;
+    }
+  }
+  assert.ok(warned, 'the fixture should exercise a pending traffic maneuver');
+  assert.ok(
+    !started || finished,
+    'the change either cancels before starting or completes at a safe distance',
+  );
+});
+
+test('gantries let ground traffic and high flight pass but stop a body intersecting the panel', () => {
+  for (const [height, status] of [
+    [0, 'playing'],
+    [8.5, 'playing'],
+    [9, 'crashed'],
+    [13.3, 'playing'],
+  ] as const) {
+    const game = playing();
+    game.state.distance = 98;
+    game.state.y = height;
+    game.update(1 / 120, controls());
+    assert.equal(game.state.status, status, `height ${height}`);
+  }
+});
+
+test('outer lanes clear the narrower sign panel with their full body but still meet the beam', () => {
+  for (const side of [-1, 1]) {
+    const panel = playing();
+    panel.state.distance = 98;
+    panel.state.y = 10;
+    panel.state.x = side * 7.2;
+    panel.state.lane = side * 2;
+    panel.update(1 / 120, controls());
+    assert.equal(
+      panel.state.status,
+      'playing',
+      'outer lane body has a real gap beside the 12m panel',
+    );
+    const beam = playing();
+    beam.state.distance = 98;
+    beam.state.y = 12.7;
+    beam.state.x = side * 7.2;
+    beam.state.lane = side * 2;
+    beam.update(1 / 120, controls());
+    assert.equal(beam.state.status, 'crashed', 'the 24m crossbeam spans every lane');
+  }
+  const edge = playing();
+  edge.state.distance = 98;
+  edge.state.y = 10;
+  edge.state.x = 7.1;
+  edge.state.lane = 2;
+  edge.update(1 / 120, controls());
+  assert.equal(edge.state.status, 'crashed', 'a body still overlapping the panel edge must hit');
+});
+
+test('swept gantry collision catches a fast pass and a crash stays crashed', () => {
+  const game = playing();
+  game.state.distance = 94;
+  game.state.y = 10;
+  game.state.speed = 2400;
+  game.update(1 / 120, controls());
+  assert.equal(game.state.status, 'crashed', 'both frame endpoints can lie outside the thin sign');
+  const distance = game.state.distance;
+  game.update(1, controls({ fly: true }));
+  assert.equal(game.state.status, 'crashed');
+  assert.equal(game.state.distance, distance);
+});
+
+test('shield or roll protects against one whole gantry and the next gantry remains dangerous', () => {
+  for (const effect of ['shield', 'roll'] as const) {
+    const game = playing();
+    game.state.distance = 98;
+    game.state.y = 12.7;
+    if (effect === 'shield') game.state.shield = 10;
+    game.update(1 / 120, controls(effect === 'roll' ? { rollRight: true } : {}));
+    assert.equal(game.state.status, 'playing');
+    if (effect === 'shield') {
+      assert.equal(game.state.shield, 0);
+      assert.equal(game.state.events.filter((event) => event.type === 'shield').length, 1);
+    }
+    game.state.invincible = 0;
+    game.state.y = 12.7;
+    game.update(1 / 120, controls());
+    assert.equal(game.state.status, 'playing', 'the same protected gantry does not hit twice');
+    game.state.distance = 298;
+    game.state.y = 12.7;
+    game.update(1 / 120, controls());
+    assert.equal(game.state.status, 'crashed');
+  }
+});
+
+test('gantries repeat after one kilometre and retry restores the first collision', () => {
+  const game = playing();
+  game.state.distance = 1098;
+  game.state.y = 10;
+  game.update(1 / 120, controls());
+  assert.equal(game.state.status, 'crashed');
+  game.start();
+  game.state.entities = [];
+  game.state.distance = 98;
+  game.state.y = 10;
+  game.update(1 / 120, controls());
+  assert.equal(
+    game.state.status,
+    'crashed',
+    'retry resets passed gantry bookkeeping and distance phase',
+  );
+});
+
+test('a kilometre milestone grants its score bonus once, including the active multiplier', () => {
+  const game = playing();
+  game.state.distance = 999.9;
+  game.state.combo = 3;
+  game.state.comboTimer = 4;
+  game.state.double = 4;
+  game.update(1 / 120, controls());
+  assert.ok(game.state.score >= 1500, '250 points ×3 chain ×2 boost');
+  const score = game.state.score;
+  game.update(1 / 120, controls());
+  assert.ok(game.state.score - score < 10, 'the same milestone cannot grant its bonus twice');
+});

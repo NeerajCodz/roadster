@@ -1,3 +1,5 @@
+import { GANTRY_LAYOUT, PLAYER_BODY } from './road-layout';
+
 export type GameStatus = 'menu' | 'playing' | 'paused' | 'crashed';
 export type PickupKind = 'bolt' | 'air' | 'shield' | 'magnet' | 'double' | 'rocket';
 export interface Entity {
@@ -10,6 +12,9 @@ export interface Entity {
   variant: number;
   pickup?: PickupKind;
   passed?: boolean;
+  targetLane?: number;
+  signal?: -1 | 0 | 1;
+  braking?: boolean;
 }
 export interface GameEvent {
   type: string;
@@ -112,6 +117,15 @@ const trafficBounds = (variant: number) => {
 const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value));
 const approach = (value: number, target: number, rate: number, dt: number) =>
   target + (value - target) * Math.exp(-rate * dt);
+const LANE_CHANGE_TIME = 1.15;
+interface TrafficMotion {
+  decisionAt: number;
+  brakeAt: number;
+  brakeUntil: number;
+  warningAt: number;
+  movingAt: number | null;
+  sourceLane: number;
+}
 
 /** A renderer-independent run. All distances are metres, speeds metres/second.
  * The player stays at z=0; incoming entities travel from negative to positive z.
@@ -128,6 +142,11 @@ export class Simulation {
   private flightExhausted = false;
   private roofId: number | null = null;
   private riddenRoofs = new Set<number>();
+  private motions = new Map<number, TrafficMotion>();
+  private nextMilestone = 1000;
+  private airborneTime = 0;
+  private bigAirAwarded = false;
+  private resolvedGantry = -1;
 
   constructor(seed = 1729) {
     this.seed = seed >>> 0;
@@ -139,6 +158,11 @@ export class Simulation {
     this.randomState = this.seed;
     this.nextId = 1;
     this.nextWaveDistance = 130;
+    this.nextMilestone = 1000;
+    this.motions.clear();
+    this.airborneTime = 0;
+    this.bigAirAwarded = false;
+    this.resolvedGantry = -1;
     this.wave = 0;
     this.previous = { ...EMPTY_CONTROLS };
     this.flightExhausted = false;
@@ -169,6 +193,10 @@ export class Simulation {
     this.flightExhausted = false;
     this.roofId = null;
     this.riddenRoofs.clear();
+    this.motions.clear();
+    this.airborneTime = 0;
+    this.bigAirAwarded = false;
+    this.resolvedGantry = -1;
   }
 
   update(dt: number, controls: Controls): void {
@@ -198,13 +226,17 @@ export class Simulation {
       s.invincible = Math.max(s.invincible, 0.72);
       s.air -= 8;
       s.lane = clamp(s.lane + s.rollDirection, -2, 2);
-      s.events.push({ type: 'roll', label: 'BARREL ROLL' });
+      this.trick('roll', 'BARREL ROLL', 100);
     }
     if (!controls.fly) this.flightExhausted = false;
     this.previous = { ...controls };
     const count = Math.ceil(dt / (1 / 120));
     const step = dt / count;
     for (let i = 0; i < count && s.status === 'playing'; i++) this.step(step, controls);
+    const live = new Set(
+      s.entities.filter((entity) => entity.kind === 'traffic').map((entity) => entity.id),
+    );
+    for (const id of this.motions.keys()) if (!live.has(id)) this.motions.delete(id);
   }
 
   private step(dt: number, controls: Controls): void {
@@ -229,16 +261,25 @@ export class Simulation {
     const targetSpeed = s.rocket > 0 ? 86 : controls.accelerate ? cruise + 22 : cruise;
     s.speed = approach(s.speed, targetSpeed, 1.9, dt);
     const travel = s.speed * dt;
+    const previousDistance = s.distance;
     s.distance += travel;
+    while (s.distance >= this.nextMilestone) {
+      s.score += 250 * (this.nextMilestone / 1000) * s.combo * (s.double > 0 ? 2 : 1);
+      s.events.push({ type: 'milestone', label: `${this.nextMilestone / 1000} KM MILESTONE` });
+      this.nextMilestone += 1000;
+    }
     s.score += travel * 0.6 * s.combo * (s.double > 0 ? 2 : 1);
+    const previousX = s.x;
     s.x = approach(s.x, s.lane * LANE_WIDTH, 11, dt);
     const previousY = s.y;
     this.moveVertically(dt, controls, this.roofFloor());
+    this.collideGantries(previousDistance, previousX, previousY);
+    if (s.status !== 'playing') return;
 
     for (const entity of s.entities) {
       const oldZ = entity.z;
       // Traffic travels forward too; stationary pickups/ramps meet the full road speed.
-      const trafficSpeed = entity.kind === 'traffic' ? 12 + (entity.variant % 5) * 2.5 : 0;
+      const trafficSpeed = entity.kind === 'traffic' ? this.moveTraffic(entity) : 0;
       entity.z += Math.max(20, s.speed - trafficSpeed) * dt;
       const dx = Math.abs(s.x - entity.x);
       if (entity.kind === 'pickup') {
@@ -290,9 +331,7 @@ export class Simulation {
         entity.passed = true;
         if (!this.riddenRoofs.has(entity.id)) {
           this.riddenRoofs.add(entity.id);
-          s.score += 150 * s.combo * (s.double > 0 ? 2 : 1);
-          s.comboTimer = 4.5;
-          s.events.push({ type: 'roof-ride', label: 'ROOF RIDE' });
+          this.trick('roof-ride', 'ROOF RIDE', 150);
         }
       } else if (
         !entity.passed &&
@@ -329,10 +368,226 @@ export class Simulation {
     s.entities = s.entities.filter(
       (entity) => entity.z < 36 && !(entity.kind === 'pickup' && entity.passed),
     );
+    if (s.status === 'playing') {
+      if (s.y > 0.6) this.airborneTime += dt;
+      else if (s.y === 0) {
+        this.airborneTime = 0;
+        this.bigAirAwarded = false;
+      }
+      if (!this.bigAirAwarded && this.airborneTime >= 1 && s.y >= 8) {
+        this.bigAirAwarded = true;
+        this.trick('big-air', 'BIG AIR', 150);
+      }
+    }
     if (s.status === 'playing' && s.distance >= this.nextWaveDistance) {
       this.spawnWave();
       this.nextWaveDistance += Math.max(68, 120 - s.distance / 100);
     }
+  }
+
+  private trick(type: string, label: string, points: number): void {
+    const s = this.state;
+    s.combo = Math.min(10, s.combo + 1);
+    s.comboTimer = 4.5;
+    s.score += points * s.combo * (s.double > 0 ? 2 : 1);
+    s.events.push({ type, label });
+  }
+
+  private collideGantries(distance: number, x: number, y: number): void {
+    const s = this.state;
+    const layout = GANTRY_LAYOUT;
+    const halfLength = PLAYER_BODY.length / 2;
+    const firstCycle = Math.max(
+      0,
+      Math.floor(
+        (distance - halfLength - layout.beam.depth / 2 - layout.firstDistance) /
+          layout.repeatLength,
+      ),
+    );
+    const lastCycle = Math.floor(
+      (s.distance + halfLength + layout.beam.depth / 2 - layout.firstDistance) /
+        layout.repeatLength,
+    );
+    for (let cycle = firstCycle; cycle <= lastCycle; cycle++) {
+      for (let n = 0; n < layout.count; n++) {
+        const index = cycle * layout.count + n;
+        if (index <= this.resolvedGantry) continue;
+        const position = cycle * layout.repeatLength + layout.firstDistance + n * layout.spacing;
+        if (
+          position + halfLength + layout.beam.depth / 2 < distance ||
+          position - halfLength - layout.beam.depth / 2 > s.distance
+        )
+          continue;
+        const hit = [layout.panel, layout.beam].some((part) => {
+          const limits = [
+            [-part.width / 2 - PLAYER_BODY.width / 2, part.width / 2 + PLAYER_BODY.width / 2],
+            [part.y - part.height / 2 - PLAYER_BODY.height, part.y + part.height / 2],
+            [position - part.depth / 2 - halfLength, position + part.depth / 2 + halfLength],
+          ];
+          const from = [x, y, distance];
+          const to = [s.x, s.y, s.distance];
+          let enter = 0,
+            exit = 1;
+          // Swept body vs exact scenery bounds, including between frame endpoints.
+          for (let axis = 0; axis < 3; axis++) {
+            const delta = to[axis] - from[axis];
+            const [low, high] = limits[axis];
+            if (Math.abs(delta) < 1e-12) {
+              if (from[axis] < low || from[axis] > high) return false;
+            } else {
+              const a = (low - from[axis]) / delta;
+              const b = (high - from[axis]) / delta;
+              enter = Math.max(enter, Math.min(a, b));
+              exit = Math.min(exit, Math.max(a, b));
+              if (enter > exit) return false;
+            }
+          }
+          return true;
+        });
+        if (!hit) continue;
+        if (s.invincible > 0) this.resolvedGantry = index;
+        else if (s.shield > 0) {
+          this.resolvedGantry = index;
+          s.shield = 0;
+          s.invincible = 1.1;
+          s.events.push({ type: 'shield', label: 'SHIELD SAVE' });
+        } else {
+          s.status = 'crashed';
+          s.boosting = false;
+          s.events.push({ type: 'crash', label: 'RUN ENDED' });
+          return;
+        }
+      }
+    }
+  }
+
+  private moveTraffic(entity: Entity): number {
+    const s = this.state;
+    let motion = this.motions.get(entity.id);
+    if (!motion) {
+      motion = {
+        decisionAt: s.time + 0.6 + this.random() * 0.6,
+        brakeAt: s.time + 1.3 + this.random() * 0.6,
+        brakeUntil: 0,
+        warningAt: 0,
+        movingAt: null,
+        sourceLane: entity.lane,
+      };
+      this.motions.set(entity.id, motion);
+    }
+    const baseSpeed = 12 + (entity.variant % 5) * 2.5;
+    if (s.time >= motion.brakeAt) {
+      if (entity.z < -110) motion.brakeUntil = s.time + 1.2;
+      motion.brakeAt = Infinity;
+    }
+    const following =
+      entity.z < -95 &&
+      s.entities.some(
+        (other) =>
+          other.id !== entity.id &&
+          other.kind === 'traffic' &&
+          Math.abs(other.y - entity.y) < 3 &&
+          Math.abs(other.x - entity.x) < 1.8 &&
+          entity.z - other.z > 7 &&
+          entity.z - other.z < 24,
+      );
+    entity.braking = entity.z < -65 && (s.time < motion.brakeUntil || following);
+    const actualSpeed = baseSpeed * (entity.braking ? 0.65 : 1);
+    const relative = Math.max(20, s.speed - baseSpeed * 0.65);
+    if (entity.targetLane !== undefined) {
+      if (motion.movingAt === null) {
+        if (s.time - motion.warningAt >= 1) {
+          // Reserve completion distance for an unexpected rocket picked up mid-maneuver.
+          const worstClosing = Math.max(20, 86 - baseSpeed * 0.65);
+          if (
+            entity.z < -75 &&
+            entity.z < -(35 + worstClosing * LANE_CHANGE_TIME) &&
+            this.destinationClear(entity, entity.targetLane, LANE_CHANGE_TIME) &&
+            this.leavesEscapeLane(entity, entity.targetLane)
+          )
+            motion.movingAt = s.time;
+          else {
+            entity.targetLane = undefined;
+            entity.signal = 0;
+            motion.decisionAt = s.time + 1.8;
+          }
+        }
+      } else {
+        const progress = clamp((s.time - motion.movingAt) / LANE_CHANGE_TIME, 0, 1);
+        const smooth = progress * progress * (3 - 2 * progress);
+        entity.x =
+          (motion.sourceLane + (entity.targetLane - motion.sourceLane) * smooth) * LANE_WIDTH;
+        if (progress === 1) {
+          entity.lane = entity.targetLane;
+          entity.x = entity.lane * LANE_WIDTH;
+          entity.targetLane = undefined;
+          entity.signal = 0;
+          motion.movingAt = null;
+          motion.decisionAt = Infinity;
+        }
+      }
+    } else if (s.time >= motion.decisionAt) {
+      motion.decisionAt = s.time + 1.8;
+      const lead = Math.max(75 + relative, 35 + relative * (1 + LANE_CHANGE_TIME));
+      if (entity.z < -lead) {
+        const direction = this.random() < 0.5 ? -1 : 1;
+        for (const offset of [direction, -direction]) {
+          const lane = entity.lane + offset;
+          if (
+            lane < -2 ||
+            lane > 2 ||
+            !this.destinationClear(entity, lane, 1 + LANE_CHANGE_TIME) ||
+            !this.leavesEscapeLane(entity, lane)
+          )
+            continue;
+          motion.sourceLane = entity.lane;
+          motion.warningAt = s.time;
+          motion.movingAt = null;
+          entity.targetLane = lane;
+          entity.signal = offset as -1 | 1;
+          break;
+        }
+      }
+    }
+    return actualSpeed;
+  }
+
+  private destinationClear(entity: Entity, lane: number, horizon: number): boolean {
+    const ownSpeed = (12 + (entity.variant % 5) * 2.5) * (entity.braking ? 0.65 : 1);
+    return !this.state.entities.some((other) => {
+      if (other.id === entity.id || Math.abs(other.y - entity.y) > 3.5) return false;
+      const occupiesLane =
+        other.lane === lane ||
+        other.targetLane === lane ||
+        Math.abs(other.x - lane * LANE_WIDTH) < 2.5;
+      if (!occupiesLane) return false;
+      const gap = entity.z - other.z;
+      if (other.kind === 'pickup' || other.kind === 'ramp') return Math.abs(gap) < 32;
+      const otherSpeed =
+        other.kind === 'traffic'
+          ? (12 + (other.variant % 5) * 2.5) * (other.braking ? 0.65 : 1)
+          : 0;
+      const futureGap = gap + (otherSpeed - ownSpeed) * horizon;
+      return gap * futureGap <= 0 || Math.min(Math.abs(gap), Math.abs(futureGap)) < 24;
+    });
+  }
+
+  private leavesEscapeLane(entity: Entity, destination: number): boolean {
+    const occupied = new Set([entity.lane, destination]);
+    for (const other of this.state.entities) {
+      if (
+        other.id === entity.id ||
+        other.kind === 'pickup' ||
+        other.kind === 'ramp' ||
+        Math.abs(other.z - entity.z) > 22
+      )
+        continue;
+      occupied.add(other.lane);
+      if (other.targetLane !== undefined) occupied.add(other.targetLane);
+      for (let lane = -2; lane <= 2; lane++)
+        if (Math.abs(other.x - lane * LANE_WIDTH) < 2) occupied.add(lane);
+    }
+    return occupied.size < 5;
   }
 
   private roofFloor(): number {
@@ -430,20 +685,44 @@ export class Simulation {
       [lanes[i], lanes[j]] = [lanes[j], lanes[i]];
     }
     const count = 1 + Math.min(2, Math.floor(s.distance / 950));
+    const aerial = s.distance > 950 && this.wave % 3 === 0;
     for (let i = 0; i < count; i++) {
-      const sky = s.distance > 650 && this.random() < 0.2;
-      const y = sky ? 7 + this.random() * 5 : 0;
+      const sky = aerial ? i < 2 : s.distance > 650 && this.random() < 0.2;
+      const y =
+        aerial && sky
+          ? this.wave % 6 === 0
+            ? [8, 11.5][i]
+            : [11.5, 7.5][i]
+          : sky
+            ? 7 + this.random() * 5
+            : 0;
       const kind = !sky && this.random() < 0.18 ? 'barrier' : 'traffic';
-      this.add(kind, lanes[i], -240 - this.random() * 38, y);
+      this.add(
+        kind,
+        lanes[i],
+        aerial ? -235 - i * (this.wave % 6 === 0 ? 12 : 32) : -240 - this.random() * 38,
+        y,
+      );
     }
     // A hanging obstruction challenges flight while preserving the wave's open lanes.
     if (s.distance > 700 && this.wave % 5 === 0) this.add('barrier', lanes[0], -258, 8);
     const rewardLane = lanes[count];
-    if (this.wave % 4 === 0) this.add('ramp', rewardLane, -218);
+    if (aerial || this.wave % 4 === 0) this.add('ramp', rewardLane, aerial ? -187 : -218);
     const kinds: PickupKind[] = ['air', 'shield', 'magnet', 'double', 'rocket'];
     const reward = this.wave % 3 === 0 ? kinds[Math.floor(this.random() * kinds.length)] : 'bolt';
-    this.add('pickup', rewardLane, -222, 1.15, reward);
-    for (let i = 0; i < 3; i++) this.add('pickup', rewardLane, -238 - i * 12, 1.15, 'bolt');
+    this.add('pickup', rewardLane, aerial ? -235 : -222, aerial ? 5.5 : 1.15, reward);
+    if (aerial) {
+      for (let i = 0; i <= 8; i++)
+        this.add(
+          'pickup',
+          rewardLane,
+          -175 - i * 20,
+          1.15 + Math.sin((i / 8) * Math.PI) * 6.2,
+          'bolt',
+        );
+    } else {
+      for (let i = 0; i < 3; i++) this.add('pickup', rewardLane, -238 - i * 12, 1.15, 'bolt');
+    }
   }
 
   private add(kind: Entity['kind'], lane: number, z: number, y = 0, pickup?: PickupKind): void {
