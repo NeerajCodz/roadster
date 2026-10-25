@@ -7,6 +7,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import type { Entity, GameState } from './simulation';
+import { spinWheels } from './vehicle';
 
 const asset = (path: string) => `${import.meta.env.BASE_URL}assets/${path}`;
 const ROAD_LENGTH = 800;
@@ -370,7 +371,7 @@ export class GameRenderer {
       flame.position.z = 2.25 + 0.85 * length;
       (flame.material as THREE.MeshBasicMaterial).opacity = fly ? 0.8 : 0.35;
     }
-    for (const wheel of this.wheels) if (moving) wheel.rotation.x -= (dt * state.speed) / 0.4;
+    if (moving) spinWheels(this.wheels, dt * state.speed);
     this.shadow.position.set(this.player.position.x, 0.018, 0);
     const shadowScale = 1 + state.y * 0.07;
     this.shadow.scale.set(shadowScale, shadowScale, 1);
