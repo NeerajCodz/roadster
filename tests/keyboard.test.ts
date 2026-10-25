@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { keyAction } from '../src/game/keyboard.ts';
 
 test('game shortcuts keep working after a header button receives focus', () => {
-  for (const code of ['Space', 'KeyA', 'ArrowRight', 'ShiftLeft', 'KeyE']) assert.equal(keyAction(code, 'playing', false, true), 'control');
+  for (const code of ['Space', 'KeyA', 'ArrowRight', 'ShiftLeft', 'KeyE'])
+    assert.equal(keyAction(code, 'playing', false, true), 'control');
 });
 test('focused results buttons keep native Enter and Space activation', () => {
   assert.equal(keyAction('Enter', 'crashed', true, true), 'native');

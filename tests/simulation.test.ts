@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { EMPTY_CONTROLS, Simulation, type Controls, type Entity, type PickupKind } from '../src/game/simulation.ts';
+import {
+  EMPTY_CONTROLS,
+  Simulation,
+  type Controls,
+  type Entity,
+  type PickupKind,
+} from '../src/game/simulation.ts';
 
 const controls = (changes: Partial<Controls> = {}): Controls => ({ ...EMPTY_CONTROLS, ...changes });
 const advance = (game: Simulation, seconds: number, input = controls(), clearRoad = true) => {
@@ -10,9 +16,21 @@ const advance = (game: Simulation, seconds: number, input = controls(), clearRoa
     game.update(seconds / frames, input);
   }
 };
-const playing = () => { const game = new Simulation(123); game.start(); game.state.entities = []; return game; };
+const playing = () => {
+  const game = new Simulation(123);
+  game.start();
+  game.state.entities = [];
+  return game;
+};
 const obstacle = (changes: Partial<Entity> = {}): Entity => ({
-  id: 999, kind: 'traffic', x: 0, y: 0, z: -2, lane: 0, variant: 0, ...changes,
+  id: 999,
+  kind: 'traffic',
+  x: 0,
+  y: 0,
+  z: -2,
+  lane: 0,
+  variant: 0,
+  ...changes,
 });
 const collect = (game: Simulation, pickup: PickupKind, changes: Partial<Entity> = {}) => {
   game.state.entities = [obstacle({ kind: 'pickup', pickup, y: 1, z: 0, ...changes })];
@@ -29,7 +47,10 @@ test('menu and pause freeze the run; resume continues and menu ends it', () => {
   game.pause();
   const frozen = { time: game.state.time, distance: game.state.distance, air: game.state.air };
   game.update(0.1, controls({ fly: true }));
-  assert.deepEqual({ time: game.state.time, distance: game.state.distance, air: game.state.air }, frozen);
+  assert.deepEqual(
+    { time: game.state.time, distance: game.state.distance, air: game.state.air },
+    frozen,
+  );
   game.resume();
   game.update(0.1, controls());
   assert.ok(game.state.distance > frozen.distance);
@@ -94,7 +115,8 @@ test('exhausted flight lands even with the button held and never escapes altitud
 });
 
 test('dive brings a flying car down faster', () => {
-  const normal = playing(); const diving = playing();
+  const normal = playing();
+  const diving = playing();
   normal.state.y = diving.state.y = 12;
   advance(normal, 0.5);
   advance(diving, 0.5, controls({ dive: true }));
@@ -106,7 +128,7 @@ test('traffic collision crashes and later updates cannot resume a crashed run', 
   game.state.entities = [obstacle()];
   game.update(1 / 60, controls());
   assert.equal(game.state.status, 'crashed');
-  assert.ok(game.state.events.some(event => event.type === 'crash'));
+  assert.ok(game.state.events.some((event) => event.type === 'crash'));
   const distance = game.state.distance;
   game.resume();
   game.update(1, controls({ fly: true }));
@@ -149,7 +171,7 @@ test('shield absorbs one collision and expires; an unprotected later hit crashes
   game.update(1 / 60, controls());
   assert.equal(game.state.status, 'playing');
   assert.equal(game.state.shield, 0);
-  assert.ok(game.state.events.some(event => event.type === 'shield'));
+  assert.ok(game.state.events.some((event) => event.type === 'shield'));
   advance(game, 2);
   game.state.entities = [obstacle()];
   game.update(1 / 60, controls());
@@ -163,7 +185,7 @@ test('bolts add currency and score exactly once and update events are transient'
   assert.equal(game.state.bolts, 1);
   assert.ok(game.state.score > baseline + 20);
   assert.equal(game.state.entities.length, 0);
-  assert.ok(game.state.events.some(event => event.type === 'pickup'));
+  assert.ok(game.state.events.some((event) => event.type === 'pickup'));
   game.update(1 / 60, controls());
   assert.equal(game.state.bolts, 1);
   assert.equal(game.state.events.length, 0);
@@ -180,16 +202,20 @@ test('air pickups replenish without overfilling', () => {
 });
 
 test('double-score pickup increases the reward for the next bolt', () => {
-  const normal = playing(); const doubled = playing();
+  const normal = playing();
+  const doubled = playing();
   collect(doubled, 'double');
   assert.ok(doubled.state.double > 0);
-  const beforeNormal = normal.state.score; const beforeDouble = doubled.state.score;
-  collect(normal, 'bolt'); collect(doubled, 'bolt');
+  const beforeNormal = normal.state.score;
+  const beforeDouble = doubled.state.score;
+  collect(normal, 'bolt');
+  collect(doubled, 'bolt');
   assert.ok(doubled.state.score - beforeDouble > (normal.state.score - beforeNormal) * 1.8);
 });
 
 test('magnet collects nearby off-lane bolts while ordinary collection cannot', () => {
-  const normal = playing(); const magnet = playing();
+  const normal = playing();
+  const magnet = playing();
   collect(magnet, 'magnet');
   assert.ok(magnet.state.magnet > 0);
   collect(normal, 'bolt', { x: 3.6, lane: 1, z: -5 });
@@ -232,21 +258,33 @@ test('a ramp automatically hops a grounded car without spending air', () => {
 });
 
 test('opening traffic leaves a fair straight-ahead start and longer runs add traffic', () => {
-  const game = new Simulation(77); game.start();
+  const game = new Simulation(77);
+  game.start();
   advance(game, 3, controls(), false);
   assert.equal(game.state.status, 'playing');
   game.state.invincible = 1000;
   advance(game, 30, controls(), false);
   assert.ok(game.state.distance > 1000);
-  assert.ok(game.state.entities.some(entity => entity.kind === 'traffic' || entity.kind === 'barrier'));
-  assert.ok(game.state.entities.every(entity => entity.z < 40));
+  assert.ok(
+    game.state.entities.some((entity) => entity.kind === 'traffic' || entity.kind === 'barrier'),
+  );
+  assert.ok(game.state.entities.every((entity) => entity.z < 40));
 });
 
 test('the same seed and controls replay identically; a different seed changes the road', () => {
-  const first = new Simulation(4); const second = new Simulation(4); const other = new Simulation(5);
-  for (const game of [first, second, other]) { game.start(); game.state.invincible = 1000; }
+  const first = new Simulation(4);
+  const second = new Simulation(4);
+  const other = new Simulation(5);
+  for (const game of [first, second, other]) {
+    game.start();
+    game.state.invincible = 1000;
+  }
   for (let frame = 0; frame < 900; frame++) {
-    const input = controls({ accelerate: frame > 120, fly: frame > 240 && frame < 300, right: frame === 600 });
+    const input = controls({
+      accelerate: frame > 120,
+      fly: frame > 240 && frame < 300,
+      right: frame === 600,
+    });
     for (const game of [first, second, other]) game.update(1 / 60, input);
   }
   assert.deepEqual(first.state, second.state);
@@ -254,7 +292,8 @@ test('the same seed and controls replay identically; a different seed changes th
 });
 
 test('ordinary frame rates produce equivalent travel and a stalled frame is bounded', () => {
-  const sixty = playing(); const thirty = playing();
+  const sixty = playing();
+  const thirty = playing();
   for (let i = 0; i < 120; i++) sixty.update(1 / 60, controls({ accelerate: true }));
   for (let i = 0; i < 60; i++) thirty.update(1 / 30, controls({ accelerate: true }));
   assert.ok(sixty.state.distance > 100 && thirty.state.distance > 100);
@@ -264,21 +303,53 @@ test('ordinary frame rates produce equivalent travel and a stalled frame is boun
   sixty.update(99, controls());
   assert.ok(sixty.state.distance - prior < 10);
   const snapshot = structuredClone(sixty.state);
-  sixty.update(Number.NaN, controls()); sixty.update(-1, controls());
+  sixty.update(Number.NaN, controls());
+  sixty.update(-1, controls());
   assert.equal(sixty.state.distance, snapshot.distance);
 });
 
 test('restart clears a crash and every transient pickup or movement effect', () => {
   const game = playing();
-  Object.assign(game.state, { status: 'crashed', score: 900, bolts: 20, y: 9, vy: 8, air: 0,
-    lane: 2, x: 7.2, shield: 3, magnet: 3, double: 3, rocket: 3, invincible: 3,
-    combo: 5, comboTimer: 3, roll: 1, rollCooldown: 1, nearMisses: 3 });
+  Object.assign(game.state, {
+    status: 'crashed',
+    score: 900,
+    bolts: 20,
+    y: 9,
+    vy: 8,
+    air: 0,
+    lane: 2,
+    x: 7.2,
+    shield: 3,
+    magnet: 3,
+    double: 3,
+    rocket: 3,
+    invincible: 3,
+    combo: 5,
+    comboTimer: 3,
+    roll: 1,
+    rollCooldown: 1,
+    nearMisses: 3,
+  });
   game.start();
   assert.equal(game.state.status, 'playing');
-  for (const value of [game.state.score, game.state.bolts, game.state.distance, game.state.y,
-    game.state.vy, game.state.lane, game.state.x, game.state.shield, game.state.magnet,
-    game.state.double, game.state.rocket, game.state.invincible, game.state.roll,
-    game.state.rollCooldown, game.state.nearMisses]) assert.equal(value, 0);
+  for (const value of [
+    game.state.score,
+    game.state.bolts,
+    game.state.distance,
+    game.state.y,
+    game.state.vy,
+    game.state.lane,
+    game.state.x,
+    game.state.shield,
+    game.state.magnet,
+    game.state.double,
+    game.state.rocket,
+    game.state.invincible,
+    game.state.roll,
+    game.state.rollCooldown,
+    game.state.nearMisses,
+  ])
+    assert.equal(value, 0);
   assert.equal(game.state.air, 100);
   assert.equal(game.state.combo, 1);
 });
@@ -296,14 +367,16 @@ test('a roll shifts exactly one lane and spends eight air', () => {
 
 test('a roll needs eight air and spending the last eight never makes air negative', () => {
   const low = playing();
-  low.state.y = 5; low.state.air = 7;
+  low.state.y = 5;
+  low.state.air = 7;
   low.update(1 / 60, controls({ rollLeft: true }));
   assert.equal(low.state.lane, 0);
   assert.equal(low.state.roll, 0);
   assert.equal(low.state.invincible, 0);
   assert.equal(low.state.air, 7);
   const enough = playing();
-  enough.state.y = 5; enough.state.air = 8;
+  enough.state.y = 5;
+  enough.state.air = 8;
   enough.update(1 / 60, controls({ rollLeft: true }));
   assert.equal(enough.state.lane, -1);
   assert.equal(enough.state.air, 0);
@@ -312,7 +385,9 @@ test('a roll needs eight air and spending the last eight never makes air negativ
 });
 
 test('a combo multiplies distance score and combines with double score', () => {
-  const ordinary = playing(); const combo = playing(); const both = playing();
+  const ordinary = playing();
+  const combo = playing();
+  const both = playing();
   combo.state.combo = both.state.combo = 3;
   combo.state.comboTimer = both.state.comboTimer = 4;
   both.state.double = 4;
@@ -322,35 +397,48 @@ test('a combo multiplies distance score and combines with double score', () => {
 });
 
 test('traffic collision height follows the actual vehicle body', () => {
-  const sedan = playing(); const van = playing();
-  for (const game of [sedan, van]) { game.state.y = 1.8; game.state.vy = 0; }
+  const sedan = playing();
+  const van = playing();
+  for (const game of [sedan, van]) {
+    game.state.y = 1.8;
+    game.state.vy = 0;
+  }
   sedan.state.entities = [obstacle({ variant: 0, z: -1 })];
   van.state.entities = [obstacle({ variant: 4, z: -1 })];
-  sedan.update(1 / 120, controls()); van.update(1 / 120, controls());
+  sedan.update(1 / 120, controls());
+  van.update(1 / 120, controls());
   assert.equal(sedan.state.status, 'playing', 'a sedan fits below the player');
   assert.equal(van.state.status, 'crashed', 'a tall van still occupies this height');
 });
 
 test('long vehicle collision reaches farther forward without an oversized carrier hitbox', () => {
-  const sedan = playing(); const bus = playing(); const carrier = playing();
+  const sedan = playing();
+  const bus = playing();
+  const carrier = playing();
   sedan.state.entities = [obstacle({ variant: 0, z: -4.6 })];
   bus.state.entities = [obstacle({ variant: 7, z: -4.6 })];
   carrier.state.entities = [obstacle({ variant: 8, z: -8 })];
   for (const game of [sedan, bus, carrier]) game.update(1 / 120, controls());
   assert.equal(sedan.state.status, 'playing');
   assert.equal(bus.state.status, 'crashed');
-  assert.equal(carrier.state.status, 'playing', 'the carrier is rendered at no more than six metres long');
+  assert.equal(
+    carrier.state.status,
+    'playing',
+    'the carrier is rendered at no more than six metres long',
+  );
 });
 
 test('descending onto a traffic roof lands safely and awards one roof ride', () => {
   const game = playing();
-  game.state.y = 1.55; game.state.vy = -5; game.state.air = 45;
+  game.state.y = 1.55;
+  game.state.vy = -5;
+  game.state.air = 45;
   game.state.entities = [obstacle({ variant: 0, z: -0.6 })];
   game.update(1 / 30, controls());
   assert.equal(game.state.status, 'playing');
   assert.ok(Math.abs(game.state.y - 1.43) < 0.01);
   assert.equal(game.state.vy, 0);
-  assert.equal(game.state.events.filter(event => event.label === 'ROOF RIDE').length, 1);
+  assert.equal(game.state.events.filter((event) => event.label === 'ROOF RIDE').length, 1);
   assert.ok(game.state.score >= 100);
   advance(game, 0.5, controls(), false);
   assert.equal(game.state.status, 'playing');
@@ -358,16 +446,22 @@ test('descending onto a traffic roof lands safely and awards one roof ride', () 
 });
 
 test('an aerial barrier can be flown underneath but hits at its occupied altitude', () => {
-  const low = playing(); const high = playing();
-  low.state.y = 5; high.state.y = 8;
-  for (const game of [low, high]) game.state.entities = [obstacle({ kind: 'barrier', y: 8, z: -1 })];
-  low.update(1 / 60, controls()); high.update(1 / 60, controls());
+  const low = playing();
+  const high = playing();
+  low.state.y = 5;
+  high.state.y = 8;
+  for (const game of [low, high])
+    game.state.entities = [obstacle({ kind: 'barrier', y: 8, z: -1 })];
+  low.update(1 / 60, controls());
+  high.update(1 / 60, controls());
   assert.equal(low.state.status, 'playing');
   assert.equal(high.state.status, 'crashed');
 });
 
 test('generated roads include all traffic styles and aerial hazards with open lanes', () => {
-  const game = new Simulation(123); game.start(); game.state.invincible = 1000;
+  const game = new Simulation(123);
+  game.start();
+  game.state.invincible = 1000;
   const variants = new Set<number>();
   let aerialBarrier = false;
   for (let frame = 0; frame < 7200; frame++) {
@@ -376,9 +470,16 @@ test('generated roads include all traffic styles and aerial hazards with open la
       if (entity.kind === 'traffic') variants.add(entity.variant);
       if (entity.kind === 'barrier' && entity.y >= 7) {
         aerialBarrier = true;
-        const blocked = new Set(game.state.entities.filter(other =>
-          other.kind !== 'pickup' && other.kind !== 'ramp' && Math.abs(other.z - entity.z) < 8,
-        ).map(other => other.lane));
+        const blocked = new Set(
+          game.state.entities
+            .filter(
+              (other) =>
+                other.kind !== 'pickup' &&
+                other.kind !== 'ramp' &&
+                Math.abs(other.z - entity.z) < 8,
+            )
+            .map((other) => other.lane),
+        );
         assert.ok(blocked.size < 5, 'a hazard row always leaves a lane open');
       }
     }

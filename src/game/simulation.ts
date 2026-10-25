@@ -1,30 +1,92 @@
 export type GameStatus = 'menu' | 'playing' | 'paused' | 'crashed';
 export type PickupKind = 'bolt' | 'air' | 'shield' | 'magnet' | 'double' | 'rocket';
 export interface Entity {
-  id: number; kind: 'traffic' | 'pickup' | 'barrier' | 'ramp';
-  x: number; y: number; z: number; lane: number; variant: number; pickup?: PickupKind; passed?: boolean;
+  id: number;
+  kind: 'traffic' | 'pickup' | 'barrier' | 'ramp';
+  x: number;
+  y: number;
+  z: number;
+  lane: number;
+  variant: number;
+  pickup?: PickupKind;
+  passed?: boolean;
 }
-export interface GameEvent { type: string; label?: string }
+export interface GameEvent {
+  type: string;
+  label?: string;
+}
 export interface GameState {
-  status: GameStatus; time: number; distance: number; score: number; bolts: number;
-  speed: number; lane: number; x: number; y: number; vy: number; air: number;
-  roll: number; rollDirection: number; rollCooldown: number; boosting: boolean;
-  combo: number; comboTimer: number; shield: number; magnet: number; double: number;
-  rocket: number; invincible: number; entities: Entity[]; events: GameEvent[]; nearMisses: number;
+  status: GameStatus;
+  time: number;
+  distance: number;
+  score: number;
+  bolts: number;
+  speed: number;
+  lane: number;
+  x: number;
+  y: number;
+  vy: number;
+  air: number;
+  roll: number;
+  rollDirection: number;
+  rollCooldown: number;
+  boosting: boolean;
+  combo: number;
+  comboTimer: number;
+  shield: number;
+  magnet: number;
+  double: number;
+  rocket: number;
+  invincible: number;
+  entities: Entity[];
+  events: GameEvent[];
+  nearMisses: number;
 }
 export interface Controls {
-  left: boolean; right: boolean; accelerate: boolean; fly: boolean;
-  dive: boolean; rollLeft: boolean; rollRight: boolean;
+  left: boolean;
+  right: boolean;
+  accelerate: boolean;
+  fly: boolean;
+  dive: boolean;
+  rollLeft: boolean;
+  rollRight: boolean;
 }
 export const EMPTY_CONTROLS: Controls = Object.freeze({
-  left: false, right: false, accelerate: false, fly: false, dive: false, rollLeft: false, rollRight: false,
+  left: false,
+  right: false,
+  accelerate: false,
+  fly: false,
+  dive: false,
+  rollLeft: false,
+  rollRight: false,
 });
 
 const freshState = (status: GameStatus): GameState => ({
-  status, time: 0, distance: 0, score: 0, bolts: 0, speed: 44,
-  lane: 0, x: 0, y: 0, vy: 0, air: 100, roll: 0, rollDirection: 1,
-  rollCooldown: 0, boosting: false, combo: 1, comboTimer: 0, shield: 0,
-  magnet: 0, double: 0, rocket: 0, invincible: 0, entities: [], events: [], nearMisses: 0,
+  status,
+  time: 0,
+  distance: 0,
+  score: 0,
+  bolts: 0,
+  speed: 44,
+  lane: 0,
+  x: 0,
+  y: 0,
+  vy: 0,
+  air: 100,
+  roll: 0,
+  rollDirection: 1,
+  rollCooldown: 0,
+  boosting: false,
+  combo: 1,
+  comboTimer: 0,
+  shield: 0,
+  magnet: 0,
+  double: 0,
+  rocket: 0,
+  invincible: 0,
+  entities: [],
+  events: [],
+  nearMisses: 0,
 });
 
 const LANE_WIDTH = 3.6;
@@ -32,9 +94,15 @@ const ROLL_DURATION = 0.65;
 // Original model bounds [width, height, length], shared with renderer.ts.
 // Each traffic model is uniformly scaled so its length never exceeds 6 m.
 const TRAFFIC_BOUNDS = [
-  [1.9, 1.43, 4.64], [1.82, 1.47, 4.04], [2, 1.82, 4.94],
-  [1.92, 1.63, 4.74], [2.06, 2.2, 5.34], [2.02, 1.77, 5.58],
-  [2.43, 3, 8.14], [2.6, 3.16, 12.22], [2.61, 2.98, 16.12],
+  [1.9, 1.43, 4.64],
+  [1.82, 1.47, 4.04],
+  [2, 1.82, 4.94],
+  [1.92, 1.63, 4.74],
+  [2.06, 2.2, 5.34],
+  [2.02, 1.77, 5.58],
+  [2.43, 3, 8.14],
+  [2.6, 3.16, 12.22],
+  [2.61, 2.98, 16.12],
 ] as const;
 const trafficBounds = (variant: number) => {
   const [width, height, length] = TRAFFIC_BOUNDS[((variant % 9) + 9) % 9];
@@ -118,7 +186,12 @@ export class Simulation {
     }
     const rollLeft = controls.rollLeft && !this.previous.rollLeft;
     const rollRight = controls.rollRight && !this.previous.rollRight;
-    if (s.rollCooldown <= 0 && s.air >= 8 && controls.rollLeft !== controls.rollRight && (rollLeft || rollRight)) {
+    if (
+      s.rollCooldown <= 0 &&
+      s.air >= 8 &&
+      controls.rollLeft !== controls.rollRight &&
+      (rollLeft || rollRight)
+    ) {
       s.roll = ROLL_DURATION;
       s.rollDirection = rollLeft ? -1 : 1;
       s.rollCooldown = 1.7;
@@ -136,7 +209,16 @@ export class Simulation {
 
   private step(dt: number, controls: Controls): void {
     const s = this.state;
-    for (const key of ['roll', 'rollCooldown', 'shield', 'magnet', 'double', 'rocket', 'invincible', 'comboTimer'] as const) {
+    for (const key of [
+      'roll',
+      'rollCooldown',
+      'shield',
+      'magnet',
+      'double',
+      'rocket',
+      'invincible',
+      'comboTimer',
+    ] as const) {
       s[key] = Math.max(0, s[key] - dt);
       if (s[key] < 1e-9) s[key] = 0;
     }
@@ -164,8 +246,13 @@ export class Simulation {
         const reachX = magnetic ? 5.6 : 1.25;
         const reachY = magnetic ? 4.5 : 1.8;
         const reachZ = magnetic ? 9 : 2.3;
-        if (!entity.passed && dx < reachX && Math.abs(s.y + 0.9 - entity.y) < reachY
-          && oldZ < reachZ && entity.z > -reachZ) {
+        if (
+          !entity.passed &&
+          dx < reachX &&
+          Math.abs(s.y + 0.9 - entity.y) < reachY &&
+          oldZ < reachZ &&
+          entity.z > -reachZ
+        ) {
           entity.passed = true;
           this.pickup(entity.pickup ?? 'bolt');
         }
@@ -180,14 +267,23 @@ export class Simulation {
         }
         continue;
       }
-      const bounds = entity.kind === 'traffic' ? trafficBounds(entity.variant) : { width: 3, height: 1.3, length: 0.7 };
+      const bounds =
+        entity.kind === 'traffic'
+          ? trafficBounds(entity.variant)
+          : { width: 3, height: 1.3, length: 0.7 };
       const top = entity.y + bounds.height;
       const width = (2.23 + bounds.width) / 2 - 0.28;
       const depth = (4.3 + bounds.length) / 2 - 0.45;
       const verticalOverlap = s.y + 1.12 > entity.y + 0.12 && s.y < top - 0.12;
       // Feet crossing a roof from above are a landing, rather than a side impact.
-      if (entity.kind === 'traffic' && s.vy <= 0 && previousY >= top - 0.035 && s.y <= top
-        && dx < bounds.width / 2 + 0.45 && Math.abs(entity.z) < bounds.length / 2 + 0.65) {
+      if (
+        entity.kind === 'traffic' &&
+        s.vy <= 0 &&
+        previousY >= top - 0.035 &&
+        s.y <= top &&
+        dx < bounds.width / 2 + 0.45 &&
+        Math.abs(entity.z) < bounds.length / 2 + 0.65
+      ) {
         s.y = top;
         s.vy = 0;
         this.roofId = entity.id;
@@ -198,7 +294,13 @@ export class Simulation {
           s.comboTimer = 4.5;
           s.events.push({ type: 'roof-ride', label: 'ROOF RIDE' });
         }
-      } else if (!entity.passed && dx < width && verticalOverlap && oldZ < depth && entity.z > -depth) {
+      } else if (
+        !entity.passed &&
+        dx < width &&
+        verticalOverlap &&
+        oldZ < depth &&
+        entity.z > -depth
+      ) {
         if (s.invincible > 0) {
           entity.passed = true;
         } else if (s.shield > 0) {
@@ -224,7 +326,9 @@ export class Simulation {
         }
       }
     }
-    s.entities = s.entities.filter(entity => entity.z < 36 && !(entity.kind === 'pickup' && entity.passed));
+    s.entities = s.entities.filter(
+      (entity) => entity.z < 36 && !(entity.kind === 'pickup' && entity.passed),
+    );
     if (s.status === 'playing' && s.distance >= this.nextWaveDistance) {
       this.spawnWave();
       this.nextWaveDistance += Math.max(68, 120 - s.distance / 100);
@@ -234,12 +338,17 @@ export class Simulation {
   private roofFloor(): number {
     if (this.roofId === null) return 0;
     const s = this.state;
-    const roof = s.entities.find(entity => entity.id === this.roofId);
+    const roof = s.entities.find((entity) => entity.id === this.roofId);
     if (roof?.kind === 'traffic') {
       const bounds = trafficBounds(roof.variant);
       const top = roof.y + bounds.height;
-      if (Math.abs(s.x - roof.x) < bounds.width / 2 + 0.45
-        && Math.abs(roof.z) < bounds.length / 2 + 0.65 && Math.abs(s.y - top) < 0.08 && s.vy <= 0) return top;
+      if (
+        Math.abs(s.x - roof.x) < bounds.width / 2 + 0.45 &&
+        Math.abs(roof.z) < bounds.length / 2 + 0.65 &&
+        Math.abs(s.y - top) < 0.08 &&
+        s.vy <= 0
+      )
+        return top;
     }
     this.roofId = null;
     return 0;
@@ -277,18 +386,30 @@ export class Simulation {
   private pickup(kind: PickupKind): void {
     const s = this.state;
     const labels: Record<PickupKind, string> = {
-      bolt: '+1 BOLT', air: 'AIR +35', shield: 'SHIELD ACTIVE',
-      magnet: 'MAGNET ACTIVE', double: 'DOUBLE SCORE', rocket: 'ROCKET BOOST',
+      bolt: '+1 BOLT',
+      air: 'AIR +35',
+      shield: 'SHIELD ACTIVE',
+      magnet: 'MAGNET ACTIVE',
+      double: 'DOUBLE SCORE',
+      rocket: 'ROCKET BOOST',
     };
     switch (kind) {
       case 'bolt':
         s.bolts++;
         s.score += 25 * s.combo * (s.double > 0 ? 2 : 1);
         break;
-      case 'air': s.air = Math.min(100, s.air + 35); break;
-      case 'shield': s.shield = 15; break;
-      case 'magnet': s.magnet = 10; break;
-      case 'double': s.double = 12; break;
+      case 'air':
+        s.air = Math.min(100, s.air + 35);
+        break;
+      case 'shield':
+        s.shield = 15;
+        break;
+      case 'magnet':
+        s.magnet = 10;
+        break;
+      case 'double':
+        s.double = 12;
+        break;
       case 'rocket':
         s.rocket = 5;
         s.invincible = Math.max(s.invincible, 5.5);
@@ -327,7 +448,12 @@ export class Simulation {
 
   private add(kind: Entity['kind'], lane: number, z: number, y = 0, pickup?: PickupKind): void {
     const entity: Entity = {
-      id: this.nextId++, kind, lane, x: lane * LANE_WIDTH, y, z,
+      id: this.nextId++,
+      kind,
+      lane,
+      x: lane * LANE_WIDTH,
+      y,
+      z,
       variant: Math.floor(this.random() * 9),
     };
     if (pickup) entity.pickup = pickup;
@@ -336,9 +462,9 @@ export class Simulation {
 
   private random(): number {
     // Mulberry32 keeps the complete random sequence local to a run, including seed 0.
-    let value = this.randomState += 0x6d2b79f5;
-    value = Math.imul(value ^ value >>> 15, value | 1);
-    value ^= value + Math.imul(value ^ value >>> 7, value | 61);
-    return ((value ^ value >>> 14) >>> 0) / 4294967296;
+    let value = (this.randomState += 0x6d2b79f5);
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
   }
 }

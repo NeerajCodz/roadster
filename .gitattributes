@@ -1,0 +1,17 @@
+# Keep source, configuration, and documentation consistent on every platform.
+* text=auto eol=lf
+
+# Preserve copied source bytes covered by asset-manifest.json checksums.
+public/assets/reference/audio/manifest.json -text
+public/assets/reference/favicon-CGsbAfJf.svg -text
+
+# Media files are binary and must never undergo line-ending conversion.
+*.glb binary
+*.hdr binary
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.webp binary
+*.mp3 binary
+*.woff binary
+*.woff2 binary
