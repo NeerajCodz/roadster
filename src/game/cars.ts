@@ -17,7 +17,7 @@ export interface CarSpec {
   name: string;
   trim: string;
   tagline: string;
-  /** Performance class shown on the badge, Asphalt style. */
+  /** Performance class shown on the card badge. */
   tier: 'S' | 'A' | 'B';
   stars: number;
   rating: number;

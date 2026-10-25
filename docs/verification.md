@@ -18,7 +18,7 @@ The user's separate model work under `tools/roadster` was left untouched and exc
 
 Regression coverage now rejects Q/E while on the road or resting on a traffic roof, does not queue held ground inputs after takeoff, and ends an active spin on either landing surface. The roll HUD and touch-button availability use the same readiness rule. All 65 tests pass. The production build passes in an isolated snapshot of this fix with the committed renderer. The live checkout build encountered incomplete TypeScript edits in the concurrent model integration; those renderer/model files were preserved. The browser recheck remained unavailable because local browser use is disabled. User model files remain untouched.
 
-## Procedural roadster and Asphalt-style showroom
+## Procedural roadster and arcade showroom
 
 - `npm test`: 85 passing tests. New coverage:
   - the exported `public/assets/models/roadster.glb` keeps its game contract: four wheel pivots that declare their tyre radius, four thruster mounts in a row at the tail, one recolourable `CarPaint`, a lit `BrakeLight`, 4.3 m length, tyres on the ground and under 180k triangles;

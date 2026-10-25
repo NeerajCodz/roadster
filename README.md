@@ -2,7 +2,7 @@
 
 A complete browser arcade game built with Three.js, TypeScript, and Vite. Drive a five-lane sunset freeway, lift above traffic with cold-gas thrusters, dive back to the road, and chain barrel rolls and near misses. Collect bolts, air refills, shields, magnets, double points, and rocket boosts while traffic becomes more demanding.
 
-The game includes an Asphalt-style showroom and paint shop with three vehicles, sixteen colours, six finishes and rim colours, responsive desktop and touch controls, a live HUD, pause and results screens, sound settings, graphics settings, and local records. The simulation and interface are implemented in this repository; the original reference media is included locally.
+The game includes an arcade showroom and paint shop with three vehicles, sixteen colours, six finishes and rim colours, responsive desktop and touch controls, a live HUD, pause and results screens, sound settings, graphics settings, and local records. The simulation and interface are implemented in this repository; the original reference media is included locally.
 
 ## Run locally
 

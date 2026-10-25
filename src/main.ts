@@ -52,7 +52,7 @@ const icon = (name: string) =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] ?? icons.arrow}</svg>`;
 const brand = `<span class="brand-symbol"><i></i><i></i></span><span class="brand-word">ROASTER<span>SIM</span></span>`;
 
-/* Showroom building blocks (Asphalt-style class badges, stars, cards, swatches and stat bars). */
+/* Showroom building blocks (class badges, stars, cards, swatches and stat bars). */
 const SEGMENTS = 12;
 const QUICK_PAINTS = [
   FACTORY,

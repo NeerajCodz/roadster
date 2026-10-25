@@ -1812,7 +1812,7 @@ select {
   }
 }
 
-/* ── Showroom: Asphalt-style car carousel, car info card and paint shop ───────────────────────── */
+/* ── Showroom: car carousel, car info card and paint shop ────────────────────────────────────── */
 :root {
   --tier-s: var(--volt);
   --tier-a: #bfe7e0;
@@ -2358,7 +2358,7 @@ body.spinning #scene {
   outline-offset: 3px;
 }
 
-/* Car carousel: Asphalt-style parallelogram cards. */
+/* Car carousel: slanted parallelogram cards. */
 .carousel {
   display: flex;
   align-items: center;
