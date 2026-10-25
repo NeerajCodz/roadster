@@ -8,6 +8,14 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import type { Entity, GameState } from './simulation';
 import { spinWheels } from './vehicle';
+import { GANTRY_LAYOUT } from './road-layout';
+import {
+  createTrafficLights,
+  disposeTrafficLights,
+  updatePlayerPosition,
+  updateTrafficLights,
+  type TrafficLights,
+} from './presentation';
 
 const asset = (path: string) => `${import.meta.env.BASE_URL}assets/${path}`;
 const ROAD_LENGTH = 800;
@@ -24,7 +32,7 @@ const TRAFFIC_TYPES = [
   'bus',
   'carrier',
 ];
-const SCENERY_LENGTH = 1000;
+const SCENERY_LENGTH = GANTRY_LAYOUT.repeatLength;
 
 export class GameRenderer {
   readonly renderer: THREE.WebGLRenderer;
@@ -58,11 +66,11 @@ export class GameRenderer {
   private trafficTemplates: THREE.Group[] = [];
   private entityTemplates = new Map<string, THREE.Group>();
   private entityPools = new Map<string, THREE.Group[]>();
+  private trafficLights = new Map<THREE.Group, TrafficLights>();
   private ownedRoots = new Set<THREE.Object3D>();
   private textures = new Set<THREE.Texture>();
   private environmentTarget: THREE.WebGLRenderTarget | null = null;
   private environmentGenerator: THREE.PMREMGenerator | null = null;
-  private targetPlayer = new THREE.Vector3();
   private targetCamera = new THREE.Vector3();
   private entityIds = new Set<number>();
   private fogDay = new THREE.Color('#927b94');
@@ -345,8 +353,7 @@ export class GameRenderer {
     this.scene.environmentIntensity = 0.95 - night * 0.35;
     if (this.scene.fog instanceof THREE.Fog)
       this.scene.fog.color.copy(this.fogDay).lerp(this.fogNight, night);
-    this.targetPlayer.set(menu ? 0 : state.x, menu ? 0 : state.y, 0);
-    this.player.position.lerp(this.targetPlayer, 1 - Math.exp(-dt * 14));
+    updatePlayerPosition(this.player.position, state, dt);
     const rollAngle =
       state.roll > 0 ? state.rollDirection * (1 - state.roll / 0.65) * Math.PI * 2 : 0;
     const lean = menu
@@ -409,7 +416,7 @@ export class GameRenderer {
       );
     }
     this.camera.updateProjectionMatrix();
-    this.syncEntities(menu ? [] : state.entities, dt);
+    this.syncEntities(menu ? [] : state.entities, dt, state.time);
     this.streaks.visible = state.boosting && moving;
     this.streaks.position.set(state.x, state.y, (this.elapsed * 80) % 50);
     this.lastStatus = state.status;
@@ -606,7 +613,8 @@ export class GameRenderer {
       hill.rotation.y = rand() * 6;
       this.scene.add(hill);
     }
-    for (let i = 0; i < 5; i++) this.scenery.add(this.makeSign(-100 - i * 200));
+    for (let i = 0; i < GANTRY_LAYOUT.count; i++)
+      this.scenery.add(this.makeSign(-GANTRY_LAYOUT.firstDistance - i * GANTRY_LAYOUT.spacing));
     for (let i = 0; i < 4; i++) this.scenery.add(this.makeBillboard(i, -150 - i * 220));
     // Two identical kilometre segments let the nearest scenery wrap without popping.
     const nextSegment = this.scenery.clone(true);
@@ -664,13 +672,20 @@ export class GameRenderer {
       metalness: 0.65,
       roughness: 0.4,
     });
-    for (const x of [-12, 12]) {
+    for (const x of [-GANTRY_LAYOUT.beam.width / 2, GANTRY_LAYOUT.beam.width / 2]) {
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.2, 14, 6), metal);
       pole.position.set(x, 7, z);
       group.add(pole);
     }
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(24, 0.4, 0.4), metal);
-    beam.position.set(0, 13, z);
+    const beam = new THREE.Mesh(
+      new THREE.BoxGeometry(
+        GANTRY_LAYOUT.beam.width,
+        GANTRY_LAYOUT.beam.height,
+        GANTRY_LAYOUT.beam.depth,
+      ),
+      metal,
+    );
+    beam.position.set(0, GANTRY_LAYOUT.beam.y, z);
     group.add(beam);
     const c = document.createElement('canvas');
     c.width = 1024;
@@ -689,15 +704,22 @@ export class GameRenderer {
     ctx.fillText('↓           OPEN ROAD           ↓', 512, 183);
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
-    const sign = new THREE.Mesh(new THREE.BoxGeometry(13, 3.25, 0.18), [
-      metal,
-      metal,
-      metal,
-      metal,
-      new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8 }),
-      metal,
-    ]);
-    sign.position.set(0, 11.3, z);
+    const sign = new THREE.Mesh(
+      new THREE.BoxGeometry(
+        GANTRY_LAYOUT.panel.width,
+        GANTRY_LAYOUT.panel.height,
+        GANTRY_LAYOUT.panel.depth,
+      ),
+      [
+        metal,
+        metal,
+        metal,
+        metal,
+        new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8 }),
+        metal,
+      ],
+    );
+    sign.position.set(0, GANTRY_LAYOUT.panel.y, z);
     group.add(sign);
     return group;
   }
@@ -882,6 +904,7 @@ export class GameRenderer {
         group.add(rim);
       }
     const rear = new THREE.MeshStandardMaterial({
+      name: 'Brake',
       color: '#d92b1d',
       emissive: '#e5391c',
       emissiveIntensity: 2,
@@ -933,7 +956,7 @@ export class GameRenderer {
     return group;
   }
 
-  private syncEntities(entities: Entity[], dt: number) {
+  private syncEntities(entities: Entity[], dt: number, time: number) {
     this.entityIds.clear();
     for (const entity of entities) this.entityIds.add(entity.id);
     for (const [id, group] of this.entityMeshes)
@@ -965,11 +988,16 @@ export class GameRenderer {
           this.ownedRoots.add(template);
         }
         group = this.entityPools.get(key)?.pop() ?? template.clone(true);
+        if (entity.kind === 'traffic' && !this.trafficLights.has(group)) {
+          this.trafficLights.set(group, createTrafficLights(group));
+        }
         group.userData.entityKey = key;
         this.entityMeshes.set(entity.id, group);
         this.scene.add(group);
       }
       group.position.set(entity.x, entity.y, entity.z);
+      const lights = this.trafficLights.get(group);
+      if (lights) updateTrafficLights(lights, entity, time);
       if (entity.kind === 'pickup') {
         group.position.y += Math.sin(this.elapsed * 3 + entity.id) * 0.16;
         group.rotation.y += dt * 1.6;
@@ -988,6 +1016,13 @@ export class GameRenderer {
     }
     // Clones share their prototype's geometry and material. Only the scene nodes are recycled.
     if (pool.length < 24) pool.push(group);
+    else {
+      const lights = this.trafficLights.get(group);
+      if (lights) {
+        disposeTrafficLights(lights);
+        this.trafficLights.delete(group);
+      }
+    }
   }
   private makePickup(entity: Entity) {
     const group = new THREE.Group();
@@ -1033,6 +1068,38 @@ export class GameRenderer {
       mat,
     );
     group.add(icon);
+    if (entity.pickup && entity.pickup !== 'bolt') {
+      const labels = {
+        air: 'AIR',
+        shield: 'SHIELD',
+        magnet: 'MAGNET',
+        double: '2×',
+        rocket: 'ROCKET',
+      };
+      const canvas = document.createElement('canvas');
+      canvas.width = 320;
+      canvas.height = 96;
+      const context = canvas.getContext('2d')!;
+      context.fillStyle = 'rgba(12, 22, 20, 0.88)';
+      context.fillRect(0, 0, 320, 96);
+      context.strokeStyle = color;
+      context.lineWidth = 5;
+      context.strokeRect(3, 3, 314, 90);
+      context.font = 'bold 46px sans-serif';
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.fillStyle = color;
+      context.fillText(labels[entity.pickup], 160, 49);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      this.textures.add(texture);
+      const label = new THREE.Sprite(
+        new THREE.SpriteMaterial({ map: texture, depthWrite: false, toneMapped: false }),
+      );
+      label.position.y = 1.05;
+      label.scale.set(2.1, 0.63, 1);
+      group.add(label);
+    }
     return group;
   }
   private createShadow() {
@@ -1085,11 +1152,15 @@ export class GameRenderer {
     this.scene.environment = null;
     this.environmentTarget?.dispose();
     this.environmentTarget = null;
-    this.disposeObjects([this.scene, ...this.ownedRoots], this.textures);
+    this.disposeObjects(
+      [this.scene, ...this.ownedRoots, ...this.trafficLights.keys()],
+      this.textures,
+    );
     this.renderer.dispose();
     this.scene.clear();
     this.entityMeshes.clear();
     this.entityPools.clear();
+    this.trafficLights.clear();
     this.entityTemplates.clear();
     this.modelCache.clear();
     this.modelLoads.clear();
@@ -1120,6 +1191,7 @@ export class GameRenderer {
             materials.add(material);
         }
         if (object instanceof THREE.InstancedMesh) instances.add(object);
+        if (object instanceof THREE.Sprite) materials.add(object.material);
       });
     for (const material of materials) {
       for (const value of Object.values(material))
