@@ -1,0 +1,220 @@
+{
+  "sourceSite": "https://roadster-rush.ai.studio/",
+  "retrievedAtUtc": "2026-10-25T09:54:15.406368+00:00",
+  "inspectedSources": [
+    "https://roadster-rush.ai.studio/",
+    "https://roadster-rush.ai.studio/assets/index-DZDTu90F.js",
+    "https://roadster-rush.ai.studio/assets/index-D6_GbB_6.css"
+  ],
+  "notes": [
+    "Publicly served content only.",
+    "Application JavaScript, CSS, HTML and third-party Three.js module were inspected but not copied into the local game.",
+    "Both original GLB assets are embedded in the application bundle; standalone model URL requests return 404.",
+    "GLB images are embedded as bufferViews. No separately downloaded texture files or decoder payloads are needed.",
+    "Environment, roadway, thruster effects and SFX use runtime generation in the original application and have no standalone downloadable asset files.",
+    "Audio manifest base is preserved unchanged from source and needs remapping to /assets/reference/audio/ when used in the local game.",
+    "No blanket reuse license was found embedded in the source site or original model assets. Copied at user request."
+  ],
+  "files": [
+    {
+      "path": "apple-touch-icon-BOCLwkzK.png",
+      "bytes": 31674,
+      "sha256": "842256cffc7576a82bfa694e95dc0cd9af420e3e96fa9fb057793fc394806f12",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/apple-touch-icon-BOCLwkzK.png"
+    },
+    {
+      "path": "audio/manifest.json",
+      "bytes": 1426,
+      "sha256": "a4857e937f98ae053ae82e8179f77c16f522a7a75b9a536e8facf730c4a7c489",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/audio/manifest.json"
+    },
+    {
+      "path": "audio/music/rocket.mp3",
+      "bytes": 493235,
+      "sha256": "1cefd444b7ea737288e698c251ec91fc50cafb34a44b5d432f4a3e74139481dc",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/audio/music/rocket.mp3"
+    },
+    {
+      "path": "audio/music/run.mp3",
+      "bytes": 493235,
+      "sha256": "221f8b4609154566009e3ae4d5c4dcdbad3583e8fecb25755f7597d27f13ae74",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/audio/music/run.mp3"
+    },
+    {
+      "path": "audio/music/title.mp3",
+      "bytes": 493235,
+      "sha256": "50f2cf05eec9f5ecae31677a68b776514c7f317397c8b17fb268a8d8b4288515",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/audio/music/title.mp3"
+    },
+    {
+      "path": "audio/voice/airLow_0.mp3",
+      "bytes": 12270,
+      "sha256": "f37b0d8d8ad354fe1c9eeeedc3d1ea4a2774034b27481eb44e0db9b1ce0bb48d",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/audio/voice/airLow_0.mp3"
+    },
+    {
+      "path": "audio/voice/closeCall_0.mp3",
+      "bytes": 21987,
+      "sha256": "a55f9216c936d1f4bf4c8293d27ba272bd9ed9e77c5c9906f1947020e5b49d15",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/audio/voice/closeCall_0.mp3"
+    },
+    {
+      "path": "audio/voice/closeCall_1.mp3",
+      "bytes": 14778,
+      "sha256": "9e560a196ed7e8148732ff5016f2e589da51b27d162dffa6c54fabc0f422687f",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/audio/voice/closeCall_1.mp3"
+    },
+    {
+      "path": "audio/voice/combo_0.mp3",
+      "bytes": 16345,
+      "sha256": "2bf5eac97a446192dddd207279deca126bc6e162652f70cb57fd54666444f168",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/audio/voice/combo_0.mp3"
+    },
+    {
+      "path": "audio/voice/combo_1.mp3",
+      "bytes": 21987,
+      "sha256": "57beb0198f907789de57d1559e82b718afa876a36827844473e1db80912c71d6",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/audio/voice/combo_1.mp3"
+    },
+    {
+      "path": "audio/voice/crash_0.mp3",
+      "bytes": 51140,
+      "sha256": "32ac376bf22c1073a24bd9545e9c2370d3010d0ce5dc0c230dfee5605bb5bb39",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/audio/voice/crash_0.mp3"
+    },
+    {
+      "path": "audio/voice/crash_1.mp3",
+      "bytes": 26689,
+      "sha256": "41cd9e99573343da7b7ec3ab521d065f8f6578b1f473a8ecb85718da2cfca1bc",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/audio/voice/crash_1.mp3"
+    },
+    {
+      "path": "audio/voice/milestone_0.mp3",
+      "bytes": 41736,
+      "sha256": "ec42582466f00565aae6a388c60d1c5ceb5a82f2453bd96ea3e1701f316c6089",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/audio/voice/milestone_0.mp3"
+    },
+    {
+      "path": "audio/voice/rocket_0.mp3",
+      "bytes": 16972,
+      "sha256": "b39493d11e51517160fd6d95f18cf5c0db8b2fffb27fae67979d807154e7bc5b",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/audio/voice/rocket_0.mp3"
+    },
+    {
+      "path": "audio/voice/roll_0.mp3",
+      "bytes": 17912,
+      "sha256": "db5ebd8eb74ad437d580bd0dd450680bc11d2ffefc9c77f09c2d111f60a1c567",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/audio/voice/roll_0.mp3"
+    },
+    {
+      "path": "audio/voice/roll_1.mp3",
+      "bytes": 22614,
+      "sha256": "7e5f2bd5a3c6d452dae53b91a226187b65cb0e9fee39da8689ff4acc1fbd64a3",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/audio/voice/roll_1.mp3"
+    },
+    {
+      "path": "audio/voice/sky_0.mp3",
+      "bytes": 22928,
+      "sha256": "20f92de38bfbed1f118adc99defede51a3516eff747035853acba6a505feb1dc",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/audio/voice/sky_0.mp3"
+    },
+    {
+      "path": "audio/voice/start_0.mp3",
+      "bytes": 30451,
+      "sha256": "07bfa91960381d80abe16c1d2a5f57dbbea3a3fe7b5c39245188eb436e2a3c45",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/audio/voice/start_0.mp3"
+    },
+    {
+      "path": "audio/voice/start_1.mp3",
+      "bytes": 30138,
+      "sha256": "8cffbe75e24dbc76e0d0eb48da7574bb7909aed825b4aceea8568f7b433c0a02",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/audio/voice/start_1.mp3"
+    },
+    {
+      "path": "favicon-32-DQ1sWQGl.png",
+      "bytes": 1835,
+      "sha256": "20b8258b0100ce55e97844826b6e63fa2ac700c4325758338c43a1a1bea18a70",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/favicon-32-DQ1sWQGl.png"
+    },
+    {
+      "path": "favicon-64-Ckz-V5wt.png",
+      "bytes": 5289,
+      "sha256": "fa31d1fce84d1bfe3e3d25a807546c5575d827b6dd2fa4f66661c4062015f0e0",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/favicon-64-Ckz-V5wt.png"
+    },
+    {
+      "path": "favicon-CGsbAfJf.svg",
+      "bytes": 5674,
+      "sha256": "af8af6f2eccbeb2cb7ffd023e8a5967d6717d5c13a942bcdaa5eaaf3e3d475f7",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/favicon-CGsbAfJf.svg"
+    },
+    {
+      "path": "inter-latin-var-Dx4kXJAl.woff2",
+      "bytes": 48256,
+      "sha256": "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/inter-latin-var-Dx4kXJAl.woff2",
+      "license": "SIL Open Font License 1.1",
+      "copyright": "Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter)",
+      "licenseUrl": "https://openfontlicense.org",
+      "localLicense": "Inter-OFL-LICENSE.txt"
+    },
+    {
+      "path": "models/roadster_user.glb",
+      "bytes": 2260188,
+      "sha256": "c7f9617d68cb01a6c4a4fc091366ce5ce804e094ffaa44004d67236a06a67bb1",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/index-DZDTu90F.js",
+      "extraction": "Decoded unmodified base64 GLB asset from embedded uf string literal.",
+      "declaredUrl": "https://roadster-rush.ai.studio/assets/models/roadster_user.glb",
+      "declaredUrlStatus": 404,
+      "license": "No license or copyright embedded in original GLB."
+    },
+    {
+      "path": "models/traffic.glb",
+      "bytes": 664848,
+      "sha256": "75538d1db046eb6f38b17d08a7b11f9a0527b23eb9663ff68d05c44767ba9543",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/index-DZDTu90F.js",
+      "extraction": "Decoded unmodified base64 GLB asset from embedded df string literal.",
+      "declaredUrl": "https://roadster-rush.ai.studio/assets/models/traffic.glb",
+      "declaredUrlStatus": 404,
+      "license": "No license or copyright embedded in original GLB."
+    },
+    {
+      "path": "textures/billboard_0.jpg",
+      "bytes": 101059,
+      "sha256": "7183efc1c12a8301156bab94acf5a53ad4d5315da52e6fc406cca672a0ab8b2a",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/textures/billboard_0.jpg"
+    },
+    {
+      "path": "textures/billboard_1.jpg",
+      "bytes": 122333,
+      "sha256": "b102c8582a0c0bc84853a2e0bb02558bdb5c0cba927b3c3645cc42846de2f33f",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/textures/billboard_1.jpg"
+    },
+    {
+      "path": "textures/billboard_2.jpg",
+      "bytes": 100635,
+      "sha256": "6178fa6b8e97df9b2c849844de16beee6ec4ab1aacd8d6cc492dedee138096e4",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/textures/billboard_2.jpg"
+    },
+    {
+      "path": "textures/billboard_3.jpg",
+      "bytes": 99745,
+      "sha256": "07b63fa9cca76360df5a72baa98dfa4bb75a44b65517aee17dbc4b1440dbac87",
+      "sourceUrl": "https://roadster-rush.ai.studio/assets/textures/billboard_3.jpg"
+    }
+  ],
+  "supplementalDocumentation": [
+    {
+      "path": "Inter-OFL-LICENSE.txt",
+      "sourceUrl": "https://raw.githubusercontent.com/rsms/inter/master/LICENSE.txt"
+    },
+    {
+      "path": "font-metadata.json",
+      "source": "Name table read from copied Inter WOFF2."
+    },
+    {
+      "path": "README.md",
+      "source": "Local asset inventory and use notes."
+    }
+  ]
+}
