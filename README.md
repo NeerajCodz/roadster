@@ -1,4 +1,4 @@
-# Roadster Rush
+# Roaster Sim
 
 A complete browser arcade game built with Three.js, TypeScript, and Vite. Drive a five-lane sunset freeway, lift above traffic with cold-gas thrusters, dive back to the road, and chain barrel rolls and near misses. Collect bolts, air refills, shields, magnets, double points, and rocket boosts while traffic becomes more demanding.
 
@@ -41,6 +41,10 @@ The car cruises automatically. Keep a clear lane or fly over obstacles; releasin
 
 Touch supports simultaneous steering and flight inputs. The game pauses when the window loses focus or the page becomes hidden. Audio starts after a user interaction, following browser playback rules.
 
+You can also use the scene itself on touch screens: swipe horizontally to steer, hold to fly, swipe down to dive, and double-tap to roll in your last steering direction. Input cancellation and queued swipe limits prevent stuck controls. The roll readiness meter shows its cooldown and low-energy state.
+
+Traffic signals before changing lanes, brakes when following a slower vehicle, and forms aerial pairs and slaloms as difficulty increases. Rolls, near misses, roof rides, and big air build trick chains; each kilometre adds a milestone bonus. Power-ups have readable labels, active timers, and matching audio feedback.
+
 ## Garage, settings, and records
 
 - **Roadster** is the original textured player vehicle from the reference game. Its original finish is available alongside four color options.
@@ -50,16 +54,18 @@ Touch supports simultaneous steering and flight inputs. The game pauses when the
 
 ## Architecture
 
-| File / directory            | Responsibility                                                                                       |
-| --------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `src/main.ts`               | Interface, keyboard and pointer input, dialogs, saved preferences, HUD, music and voice playback     |
-| `src/game/simulation.ts`    | Seeded, renderer-independent game state, movement, flight, traffic, collisions, scoring, and pickups |
-| `src/game/renderer.ts`      | Three.js scene, model loading, freeway and scenery, lighting, effects, camera, and graphics quality  |
-| `src/game/audio.ts`         | Web Audio engine, wind, thrusters, and gameplay sound effects                                        |
-| `src/style.css`             | Responsive garage, HUD, dialogs, typography, and touch controls                                      |
-| `tests/simulation.test.ts`  | Simulation regression tests without a browser or GPU                                                 |
-| `public/assets/`            | Locally served models, HDR environment, original media, and license documents                        |
-| `scripts/verify-assets.mjs` | Dependency-free validation of the original media inventory                                           |
+| File / directory                               | Responsibility                                                                                       |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `src/main.ts`                                  | Interface, keyboard and pointer input, dialogs, saved preferences, HUD, music and voice playback     |
+| `src/game/simulation.ts`                       | Seeded, renderer-independent game state, movement, flight, traffic, collisions, scoring, and pickups |
+| `src/game/renderer.ts`                         | Three.js scene, model loading, freeway and scenery, lighting, effects, camera, and graphics quality  |
+| `src/game/audio.ts`                            | Web Audio engine, wind, thrusters, and gameplay sound effects                                        |
+| `src/game/keyboard.ts`, `src/game/gestures.ts` | Keyboard focus routing and touch gesture interpretation                                              |
+| `src/game/presentation.ts`                     | Collision-aligned player position and per-vehicle traffic lights                                     |
+| `src/style.css`                                | Responsive garage, HUD, dialogs, typography, and touch controls                                      |
+| `tests/simulation.test.ts`                     | Simulation regression tests without a browser or GPU                                                 |
+| `public/assets/`                               | Locally served models, HDR environment, original media, and license documents                        |
+| `scripts/verify-assets.mjs`                    | Dependency-free validation of the original media inventory                                           |
 
 The player stays near the scene origin while incoming entities move along the road. Rendering follows simulation state, so the game rules can be tested independently of WebGL. Models, fonts, images, and audio are served from the build's own files.
 
@@ -72,7 +78,7 @@ The player stays near the scene origin while incoming entities move along the ro
 - **Original reference media:** the 29 assets from [Roadster Rush](https://roadster-rush.ai.studio/) were copied at the user's request: the player Roadster, nine traffic vehicle meshes in one GLB, four billboards, three music tracks, fourteen voice clips, the audio manifest, Inter font, and four icons. The two GLBs were extracted unchanged from embedded binary assets. No blanket reuse license was found for this media; the original models contain no license or copyright fields. Inter is covered separately below. Sources, file sizes, and SHA-256 hashes are recorded in the [reference asset manifest](public/assets/reference/asset-manifest.json); see the [reference asset notes](public/assets/reference/README.md).
 - **Aero GT / CarConcept:** model and textures by Eric Chadwick, © 2024 Darmstadt Graphics Group GmbH, from [Khronos glTF Sample Assets](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CarConcept), under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The stored GLB is unchanged; the game changes paint and plate materials at runtime. See the [asset attribution](public/assets/ATTRIBUTION.md), [original license](public/assets/CarConcept-LICENSE.md), [full CC BY text](public/assets/CC-BY-4.0.txt), and [Khronos logo notice](public/assets/Khronos-LOGO-LICENSE.txt).
 - **Venice Sunset HDRI:** Greg Zaal / [Poly Haven](https://polyhaven.com/a/venice_sunset), [CC0](https://polyhaven.com/license).
-- **Fonts:** Manrope and Space Grotesk are installed through the Fontsource npm packages under the SIL Open Font License. Their license files are included with the installed packages. The copied Inter font credits The Inter Project Authors and includes its [SIL OFL license](public/assets/reference/Inter-OFL-LICENSE.txt) and [embedded font metadata](public/assets/reference/font-metadata.json).
+- **Fonts:** Manrope and Space Grotesk are installed through the Fontsource npm packages under the SIL Open Font License. Their [Manrope license](public/assets/licenses/Manrope-OFL.txt) and [Space Grotesk license](public/assets/licenses/SpaceGrotesk-OFL.txt) are bundled with the static build. The copied Inter font credits The Inter Project Authors and includes its [SIL OFL license](public/assets/reference/Inter-OFL-LICENSE.txt) and [embedded font metadata](public/assets/reference/font-metadata.json).
 - **Three.js:** [Three.js](https://threejs.org/), under the MIT license, including its example loaders and post-processing modules.
 
 The individual media licenses and notices remain applicable to their respective assets.
