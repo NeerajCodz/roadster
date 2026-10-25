@@ -8,6 +8,26 @@ import { GameRenderer } from './game/renderer';
 import { GameAudio } from './game/audio';
 import { CONTROL_CODES, keyAction } from './game/keyboard';
 import { GestureInput } from './game/gestures';
+import {
+  BODY_COLORS,
+  CARS,
+  FACTORY,
+  FINISHES,
+  RIM_COLORS,
+  STAT_ROWS,
+  adjacentCar,
+  carById,
+  colorName,
+  isDefaultLook,
+  litSegments,
+  lookSummary,
+  sanitizeLook,
+  shownBody,
+  statFraction,
+  type CarId,
+  type CarLook,
+  type CarSpec,
+} from './game/cars';
 
 const icons: Record<string, string> = {
   arrow: '<path d="M5 19 19 5M5 5h14v14"/>',
@@ -23,25 +43,64 @@ const icons: Record<string, string> = {
   up: '<path d="m5 14 7-7 7 7"/>',
   roll: '<path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5"/>',
   shield: '<path d="m12 3 8 3v6c0 4-8 9-8 9s-8-5-8-9V6z"/>',
+  roller: '<path d="M4 4h13v5H4zM17 6.5h3v5.5h-9v2.5M10 14.5h2V21h-2z"/>',
+  down: '<path d="m6 9 6 6 6-6"/>',
+  reset: '<path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4.5h4.5"/>',
+  spin: '<path d="M8 16.4C4.9 15.7 3 14 3 12c0-2.5 4-4.5 9-4.5s9 2 9 4.5c0 2.2-3.2 4-7.5 4.4M11 14l3 2.5-3 2.5"/>',
 };
 const icon = (name: string) =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] ?? icons.arrow}</svg>`;
 const brand = `<span class="brand-symbol"><i></i><i></i></span><span class="brand-word">ROASTER<span>SIM</span></span>`;
+
+/* Showroom building blocks (Asphalt-style class badges, stars, cards, swatches and stat bars). */
+const SEGMENTS = 12;
+const QUICK_PAINTS = [
+  FACTORY,
+  '#e9e6e0',
+  '#d7ed65',
+  '#0e0f11',
+  '#b3121f',
+  '#f2a71b',
+  '#1f9aa6',
+  '#2448c8',
+];
+const BODY_SWATCHES = [{ name: 'Factory', hex: FACTORY }, ...BODY_COLORS];
+const tierBadge = (tier: string) =>
+  `<span class="tier-badge" data-tier="${tier}" aria-hidden="true"><b>${tier}</b></span>`;
+const stars = (count: number) =>
+  `<span class="stars" aria-hidden="true">${Array.from({ length: 5 }, (_, i) => `<i${i < count ? ' class="on"' : ''}></i>`).join('')}</span>`;
+/** Longer names drop a size so they hold one line on cards and in the info panel. */
+const longName = (car: CarSpec) => (car.name.length > 9 ? ' data-long' : '');
+const carCard = (car: CarSpec, index: number) =>
+  `<button class="car-card" role="radio" aria-checked="false" tabindex="-1" data-car="${car.id}" style="--i:${index}" aria-label="${car.name} ${car.trim}, class ${car.tier}, ${car.stars} of 5 stars, rank ${car.rating}">
+    <span class="card-top">${tierBadge(car.tier)}${stars(car.stars)}</span>
+    <strong class="card-name"${longName(car)}><span>${car.name}</span></strong>
+    <span class="card-meta"><span>${car.trim}</span><b><small>RANK</small>${car.rating}</b></span>
+    <span class="card-index" aria-hidden="true">${String(index + 1).padStart(2, '0')}</span>
+    <span class="card-load" aria-hidden="true"></span>
+  </button>`;
+const swatch = (kind: 'body' | 'rim', { name, hex }: { name: string; hex: string }) =>
+  `<button class="swatch${hex === FACTORY ? ' swatch-factory' : ''}" role="radio" aria-checked="false" tabindex="-1" data-${kind}="${hex}"${hex === FACTORY ? '' : ` style="--paint:${hex}"`} aria-label="${hex === FACTORY ? (kind === 'rim' ? 'Factory rims' : 'Factory colour') : name}" title="${name}"></button>`;
+const statRow = ({ key, label, unit }: (typeof STAT_ROWS)[number]) =>
+  `<div class="stat-row" data-stat="${key}"><dt>${label}</dt><dd><span class="stat-value"><b>0</b>${unit ? ` <small>${unit}</small>` : ''}</span><span class="seg-bar" aria-hidden="true">${Array.from({ length: SEGMENTS }, (_, i) => `<i style="--i:${i}"></i>`).join('')}</span></dd></div>`;
 type Preferences = {
   sound: boolean;
   quality: 'high' | 'performance';
-  paint: number;
-  car: 'roadster' | 'concept';
+  car: CarId;
+  /** Paint shop choices, remembered per car. */
+  looks: Record<CarId, CarLook>;
   bestScore: number;
   bestDistance: number;
   bolts: number;
   runs: number;
 };
+const defaultLooks = () =>
+  Object.fromEntries(CARS.map((car) => [car.id, { ...car.look }])) as Record<CarId, CarLook>;
 const defaults: Preferences = {
   sound: true,
   quality: 'high',
-  paint: 0,
   car: 'roadster',
+  looks: defaultLooks(),
   bestScore: 0,
   bestDistance: 0,
   bolts: 0,
@@ -54,8 +113,10 @@ try {
     ...defaults,
     sound: typeof saved.sound === 'boolean' ? saved.sound : true,
     quality: saved.quality === 'performance' ? 'performance' : 'high',
-    paint: Number.isInteger(saved.paint) && saved.paint >= 0 && saved.paint <= 4 ? saved.paint : 0,
-    car: saved.car === 'concept' ? 'concept' : 'roadster',
+    car: carById(saved.car).id,
+    looks: Object.fromEntries(
+      CARS.map((car) => [car.id, sanitizeLook(saved.looks?.[car.id], car)]),
+    ) as Record<CarId, CarLook>,
   };
   for (const key of ['bestScore', 'bestDistance', 'bolts', 'runs'] as const)
     if (Number.isFinite(saved[key]) && saved[key] >= 0) prefs[key] = saved[key];
@@ -102,25 +163,71 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
       </div>
     </section>
 
-    <section class="garage-panel" id="garage-panel" hidden aria-labelledby="garage-title">
-      <div class="eyebrow"><span class="status-dot"></span> YOUR MACHINE. YOUR SIGNATURE.</div>
-      <h1 id="garage-title">PURE<br><em>POTENTIAL.</em></h1>
-      <p class="hero-copy">Two machines. One open road.<br>Choose your ride and make it yours.</p>
-      <div class="vehicle-selector" role="group" aria-label="Select vehicle">
-        <button class="vehicle-card" data-car="roadster"><span>01 / ORIGINAL</span><strong>ROADSTER</strong><small>THE ONE THAT STARTED IT</small></button>
-        <button class="vehicle-card" data-car="concept"><span>02 / CONCEPT</span><strong>AERO GT</strong><small>PRECISION IN EVERY DETAIL</small></button>
+    <section class="garage-panel paint-shop" id="garage-panel" hidden aria-labelledby="garage-title">
+      <div class="eyebrow"><span class="status-dot"></span> PAINT SHOP <span class="eyebrow-car" id="shop-car">/ ROADSTER</span></div>
+      <h1 id="garage-title">MAKE IT <em>YOURS.</em></h1>
+      <div class="shop-body">
+        <div class="shop-spec"><span class="micro-label" id="shop-spec-label">CURRENT SPEC</span><strong id="shop-summary">FACTORY SPEC</strong><span class="shop-rim" id="shop-rim">RIMS · FACTORY</span></div>
+        <div class="shop-tabs" role="tablist" aria-label="Paint category">
+          <button class="shop-tab" role="tab" id="tab-body" data-tab="body" aria-selected="true" aria-controls="pane-body"><span id="tab-body-label">BODY</span></button>
+          <button class="shop-tab" role="tab" id="tab-rims" data-tab="rims" aria-selected="false" aria-controls="pane-rims" tabindex="-1"><span>RIMS</span></button>
+        </div>
+        <div class="shop-panes">
+        <div class="shop-pane" role="tabpanel" id="pane-body" aria-labelledby="tab-body">
+          <div class="shop-field"><span class="micro-label" id="finish-label">FINISH <b id="finish-name">FACTORY</b></span>
+            <div class="finish-chips" role="radiogroup" aria-labelledby="finish-label">${FINISHES.map(({ id, label }) => `<button class="finish-chip" role="radio" aria-checked="false" tabindex="-1" data-finish="${id}"><i class="finish-preview" aria-hidden="true"></i><span>${label}</span></button>`).join('')}</div>
+          </div>
+          <div class="shop-field"><span class="micro-label" id="body-label"><span id="body-kind">COLOUR</span> <b id="body-name">FACTORY</b></span>
+            <div class="swatches swatch-grid" role="radiogroup" aria-labelledby="body-label">${BODY_SWATCHES.map((item) => swatch('body', item)).join('')}</div>
+            <p class="shop-note" id="tint-note" hidden>RUSH ORIGINAL WEARS A BAKED LIVERY. COLOURS TINT IT RATHER THAN REPAINT IT.</p>
+          </div>
+        </div>
+        <div class="shop-pane" role="tabpanel" id="pane-rims" aria-labelledby="tab-rims" hidden>
+          <div class="shop-field"><span class="micro-label" id="rim-label">RIM COLOUR <b id="rim-name">FACTORY</b></span>
+            <div class="swatches swatch-grid" id="rim-swatches" role="radiogroup" aria-labelledby="rim-label" aria-describedby="rim-note">${RIM_COLORS.map((item) => swatch('rim', item)).join('')}</div>
+            <p class="shop-note" id="rim-note" hidden></p>
+          </div>
+        </div>
+        </div>
+        <div class="shop-actions">
+          <button class="ghost-button" id="paint-reset" title="Back to the showroom spec">${icon('reset')}<span>RESET PAINT</span></button>
+          <button class="primary-button" id="garage-start"><span>TAKE IT FOR A DRIVE</span>${icon('arrow')}</button>
+        </div>
       </div>
-      <div class="paint-control"><span class="micro-label">FINISH <b id="paint-name">VOLT</b></span><div class="paint-swatches" role="group" aria-label="Vehicle paint">
-        ${['Volt', 'Ceramic', 'Titanium', 'Ember', 'Graphite'].map((name, i) => `<button class="paint-swatch" data-paint="${i}" style="--paint:${['#d7ed65', '#ece9df', '#9bacbb', '#e4633f', '#222b2b'][i]}" aria-label="${name} paint" title="${name}"></button>`).join('')}
-      </div></div>
-      <button class="primary-button" id="garage-start"><span>TAKE IT FOR A DRIVE</span>${icon('arrow')}</button>
     </section>
   </main>
 
-  <aside class="vehicle-caption" id="vehicle-caption"><span class="caption-line"></span><div><span class="micro-label">MEET YOUR ESCAPE</span><strong id="car-caption">ROADSTER <span>/ 01</span></strong><p>ELECTRIC SOUL. UNTAMED SPIRIT.</p></div></aside>
-  <div class="scene-coordinate"><span>36° 16′ N &nbsp; 121° 48′ W</span><strong>PACIFIC COAST HIGHWAY</strong></div>
-  <div class="menu-bottom" id="menu-bottom"><div class="controls-preview"><span><kbd>A</kbd><kbd>D</kbd> STEER</span><span><kbd>SPACE</kbd> FLY</span><span><kbd>Q</kbd><kbd>E</kbd> AIR ROLL</span><span><kbd>SHIFT</kbd> BOOST</span></div><span class="edition">A NEW PERSPECTIVE ON THE DAILY DRIVE</span></div>
-  <footer class="site-footer" id="site-footer"><span><i class="tiny-dot"></i> <span id="systems">SYSTEMS ONLINE</span></span><span>BUILT FOR THE OPEN ROAD. <b>AND BEYOND.</b></span><span>VOL. 01 <i class="footer-cross">＋</i></span></footer>
+  <div class="stage-loader" aria-hidden="true"><span>LOADING <b id="stage-loader-name">ROADSTER</b></span><i></i></div>
+  <aside class="car-info" id="car-info" aria-labelledby="ci-name">
+    <div class="ci-head"><span id="ci-tier">${tierBadge('S')}</span><span class="ci-class" id="ci-class">CLASS S</span><span id="ci-stars">${stars(5)}</span><span class="sr-only" id="ci-stars-text"></span></div>
+    <h2 class="car-name" id="ci-name"><span>ROADSTER</span></h2>
+    <p class="ci-trim"><b id="ci-trim">2026 · THRUST</b><span id="ci-tagline"></span></p>
+    <div class="ci-rank"><span class="micro-label"><span class="ci-rank-pre">PERFORMANCE </span>RANK</span><strong id="ci-rank">0000</strong><button class="ci-toggle" id="ci-toggle" aria-expanded="false" aria-controls="ci-stats"><span>SPECS</span>${icon('down')}</button></div>
+    <div class="ci-stats" id="ci-stats">
+      <dl class="stat-list">${STAT_ROWS.map(statRow).join('')}</dl>
+      <p class="ci-note">SHOWROOM FIGURES · EVERY CAR RUNS THE SAME ROAD</p>
+    </div>
+  </aside>
+
+  <section class="showroom-dock" id="showroom-dock" aria-label="Showroom">
+    <div class="dock-paint" id="dock-paint">
+      <div class="dock-label"><span class="micro-label" id="quick-paint-label">QUICK PAINT</span><b id="quick-paint-name">FACTORY</b></div>
+      <div class="dock-paint-row">
+        <div class="swatches quick-swatches" role="radiogroup" aria-labelledby="quick-paint-label">${QUICK_PAINTS.map((hex) => swatch('body', { name: colorName(hex), hex })).join('')}</div>
+        <button class="skew-button" id="customize"><span>${icon('roller')}<span class="skew-label">CUSTOMIZE</span></span></button>
+      </div>
+    </div>
+    <div class="dock-garage">
+      <div class="dock-label"><span class="micro-label" id="garage-label">SHOWROOM <span>/ ${String(CARS.length).padStart(2, '0')} MACHINES</span></span><span class="dock-status" id="dock-status" aria-hidden="true"></span><span class="spin-hint">${icon('spin')}<span>DRAG THE CAR TO SPIN IT</span></span></div>
+      <div class="carousel">
+        <button class="carousel-arrow" id="car-prev" aria-label="Previous car">${icon('left')}</button>
+        <div class="carousel-track" id="car-track" role="radiogroup" aria-labelledby="garage-label">${CARS.map(carCard).join('')}</div>
+        <button class="carousel-arrow" id="car-next" aria-label="Next car">${icon('right')}</button>
+      </div>
+    </div>
+    <p class="sr-only" id="car-live" role="status" aria-live="polite"></p>
+  </section>
+  <footer class="site-footer" id="site-footer"><span><i class="tiny-dot"></i> <span id="systems">SYSTEMS ONLINE</span></span><span class="controls-preview"><span><kbd>A</kbd><kbd>D</kbd> STEER</span><span><kbd>SPACE</kbd> FLY</span><span><kbd>Q</kbd><kbd>E</kbd> AIR ROLL</span><span><kbd>SHIFT</kbd> BOOST</span></span><span>VOL. 01 <i class="footer-cross">＋</i></span></footer>
 
   <section class="game-hud" id="hud" hidden aria-label="Game status">
     <div class="hud-score"><span class="micro-label">SCORE</span><strong id="score">000000</strong><div><span id="distance">0.00 KM</span><span class="hud-bolts">${icon('bolt')}<b id="bolts">0</b></span></div></div>
@@ -148,13 +255,13 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <button class="primary-button dialog-close"><span>GOT IT. LET’S GO.</span>${icon('arrow')}</button>
   </dialog>
 
-  <dialog id="settings-dialog" class="panel-dialog settings-dialog"><button class="dialog-close icon-button" aria-label="Close settings">${icon('close')}</button><div class="eyebrow">TUNE YOUR EXPERIENCE</div><h2>THE DETAILS<br><em>MATTER.</em></h2><div class="setting-row"><div><h3>SOUND</h3><p>Engine, soundtrack and the wind.</p></div><button class="toggle-button" id="sound-setting" role="switch" aria-checked="true">ON <i></i></button></div><div class="setting-row"><div><h3>GRAPHICS</h3><p>Find your balance of detail and speed.</p></div><select id="quality" aria-label="Graphics quality"><option value="high">HIGH QUALITY</option><option value="performance">PERFORMANCE</option></select></div><div class="settings-note">Your records and preferences are saved on this device.<br>Original reference assets + an additional PBR concept car.</div><button class="text-button" data-open="credits">VIEW ASSET CREDITS ${icon('arrow')}</button></dialog>
+  <dialog id="settings-dialog" class="panel-dialog settings-dialog"><button class="dialog-close icon-button" aria-label="Close settings">${icon('close')}</button><div class="eyebrow">TUNE YOUR EXPERIENCE</div><h2>THE DETAILS<br><em>MATTER.</em></h2><div class="setting-row"><div><h3>SOUND</h3><p>Engine, soundtrack and the wind.</p></div><button class="toggle-button" id="sound-setting" role="switch" aria-checked="true">ON <i></i></button></div><div class="setting-row"><div><h3>GRAPHICS</h3><p>Find your balance of detail and speed.</p></div><select id="quality" aria-label="Graphics quality"><option value="high">HIGH QUALITY</option><option value="performance">PERFORMANCE</option></select></div><div class="settings-note">Your records, car and paint choices are saved on this device.<br>Three machines: the Roadster (2026), an original procedural build, plus the Rush Original and the Aero GT concept.</div><button class="text-button" data-open="credits">VIEW ASSET CREDITS ${icon('arrow')}</button></dialog>
 
-  <dialog id="credits-dialog" class="panel-dialog credits-dialog"><button class="dialog-close icon-button" aria-label="Close credits">${icon('close')}</button><div class="eyebrow">UNDER THE HOOD</div><h2>GOOD COMPANY.</h2><p>Inspired by Roadster Rush. Original car, traffic, billboards, soundtrack, voices and Inter font copied from the public reference at your request.</p><a href="https://roadster-rush.ai.studio/" target="_blank" rel="noopener noreferrer">Roadster Rush reference ${icon('arrow')}</a><p>Aero GT uses CarConcept by Eric Chadwick, © 2024 Darmstadt Graphics Group GmbH, licensed CC BY 4.0. Paint and license plate materials modified.</p><a href="https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CarConcept" target="_blank" rel="noopener noreferrer">CarConcept / Khronos ${icon('arrow')}</a><p>Venice Sunset HDR by Greg Zaal / Poly Haven, CC0. Manrope and Space Grotesk fonts under SIL OFL. Built with Three.js.</p><a href="https://polyhaven.com/a/venice_sunset" target="_blank" rel="noopener noreferrer">Poly Haven ${icon('arrow')}</a></dialog>
+  <dialog id="credits-dialog" class="panel-dialog credits-dialog"><button class="dialog-close icon-button" aria-label="Close credits">${icon('close')}</button><div class="eyebrow">UNDER THE HOOD</div><h2>GOOD COMPANY.</h2><p>The Roadster (2026) is an original procedural model built for Roaster Sim in tools/roadster. It uses no third-party assets, so no outside license applies.</p><p>Inspired by Roadster Rush. The Rush Original car, traffic, billboards, soundtrack, voices and Inter font were copied from the public reference at your request.</p><a href="https://roadster-rush.ai.studio/" target="_blank" rel="noopener noreferrer">Roadster Rush reference ${icon('arrow')}</a><p>Aero GT uses CarConcept by Eric Chadwick, © 2024 Darmstadt Graphics Group GmbH, licensed CC BY 4.0. Paint and license plate materials modified.</p><a href="https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CarConcept" target="_blank" rel="noopener noreferrer">CarConcept / Khronos ${icon('arrow')}</a><p>Venice Sunset HDR by Greg Zaal / Poly Haven, CC0. Manrope and Space Grotesk fonts under SIL OFL. Built with Three.js.</p><a href="https://polyhaven.com/a/venice_sunset" target="_blank" rel="noopener noreferrer">Poly Haven ${icon('arrow')}</a></dialog>
 
-  <dialog id="pause-dialog" class="panel-dialog run-dialog"><div class="eyebrow"><span class="status-dot"></span> TAKE A BREATHER</div><h2>THE ROAD<br><em>CAN WAIT.</em></h2><p>Your run is right where you left it.</p><button class="primary-button" id="resume"><span>BACK TO THE DRIVE</span>${icon('arrow')}</button><button class="secondary-button" id="restart">START A FRESH RUN</button><button class="text-button" id="pause-home">RETURN TO GARAGE</button></dialog>
+  <dialog id="pause-dialog" class="panel-dialog run-dialog"><div class="eyebrow"><span class="status-dot"></span> TAKE A BREATHER</div><h2>THE ROAD<br><em>CAN WAIT.</em></h2><p>Your run is right where you left it.</p><button class="primary-button" id="resume"><span>BACK TO THE DRIVE</span>${icon('arrow')}</button><button class="secondary-button" id="restart">START A FRESH RUN</button><button class="text-button" id="pause-home">BACK TO SHOWROOM</button></dialog>
 
-  <dialog id="results-dialog" class="panel-dialog run-dialog results-dialog"><div class="eyebrow" id="result-eyebrow">ONE FOR THE BOOKS</div><h2>WHAT<br><em>A RIDE.</em></h2><span class="micro-label">FINAL SCORE</span><strong class="result-score" id="result-score">000000</strong><div class="result-stats"><div><span>DISTANCE</span><strong id="result-distance">0.00 <small>KM</small></strong></div><div><span>BOLTS</span><strong id="result-bolts">0</strong></div><div><span>NEAR MISSES</span><strong id="result-near">0</strong></div></div><p class="result-best" id="result-best"></p><button class="primary-button" id="retry"><span>ONE MORE RUN</span>${icon('arrow')}</button><button class="text-button" id="result-home">BACK TO GARAGE</button></dialog>
+  <dialog id="results-dialog" class="panel-dialog run-dialog results-dialog"><div class="eyebrow" id="result-eyebrow">ONE FOR THE BOOKS</div><h2>WHAT<br><em>A RIDE.</em></h2><span class="micro-label">FINAL SCORE</span><strong class="result-score" id="result-score">000000</strong><div class="result-stats"><div><span>DISTANCE</span><strong id="result-distance">0.00 <small>KM</small></strong></div><div><span>BOLTS</span><strong id="result-bolts">0</strong></div><div><span>NEAR MISSES</span><strong id="result-near">0</strong></div></div><p class="result-best" id="result-best"></p><button class="primary-button" id="retry"><span>ONE MORE RUN</span>${icon('arrow')}</button><button class="text-button" id="result-home">BACK TO SHOWROOM</button></dialog>
   <div class="fatal-error" id="fatal-error" hidden><div class="eyebrow">A QUICK PIT STOP</div><h2>3D COULDN’T START.</h2><p>Your browser couldn’t create a WebGL context. Enable hardware acceleration or try a WebGL-capable browser.</p><button class="primary-button" onclick="location.reload()">TRY AGAIN</button></div>
 `;
 
@@ -171,11 +278,16 @@ try {
   throw error;
 }
 scene.setQuality(prefs.quality);
-scene.onModelLoaded = () => {
-  scene.setPaint(prefs.paint);
-  $('#systems').textContent = 'SYSTEMS ONLINE';
-};
-if (prefs.car === 'concept') void scene.loadCar('CarConcept.glb');
+/** The car whose model is on screen, the one being fetched, and one that just failed to load. */
+let shownCar: CarId | null = null;
+let loadingCar: CarId | null = prefs.car;
+let failedCar: CarId | null = null;
+let announceCar = false;
+let statusTimeout: ReturnType<typeof setTimeout> | undefined;
+scene.onModelLoaded = (path) => carLoaded(path);
+scene.onModelError = (path) => carFailed(path);
+scene.setLook(prefs.looks[prefs.car]);
+void scene.loadCar(carById(prefs.car).model);
 
 const assetPath = (path: string) => `${import.meta.env.BASE_URL}assets/reference/audio/${path}`;
 const music = new Audio(assetPath('music/run.mp3'));
@@ -217,10 +329,22 @@ const keys = new Set<string>();
 const pointers = new Map<number, keyof Controls>();
 const gestures = new GestureInput();
 let panel: 'drive' | 'garage' = 'drive';
+/** The menu panel a run was launched from, restored when the driver heads back. */
+let runPanel: 'drive' | 'garage' = 'drive';
 let lastStatus = sim.state.status;
 let toastUntil = 0;
 let resultTimeout: ReturnType<typeof setTimeout> | undefined;
+let showroomDrag: { id: number; x: number; time: number } | null = null;
+function endShowroomDrag() {
+  if (!showroomDrag) return;
+  // Holding still before letting go should not fling the car.
+  if (performance.now() - showroomDrag.time > 90) scene.dragMenuYaw(0);
+  showroomDrag = null;
+  scene.releaseMenuYaw();
+  document.body.classList.remove('spinning');
+}
 const clearInput = () => {
+  endShowroomDrag();
   keys.clear();
   pointers.clear();
   gestures.reset();
@@ -234,32 +358,222 @@ function refreshRecords() {
   $('#menu-best').textContent = number(prefs.bestScore);
   $('#menu-distance').textContent = (prefs.bestDistance / 1000).toFixed(2);
 }
-function refreshGarage() {
-  document.querySelectorAll<HTMLButtonElement>('[data-car]').forEach((el) => {
-    const selected = el.dataset.car === prefs.car;
-    el.classList.toggle('selected', selected);
-    el.setAttribute('aria-pressed', String(selected));
+/** Marks the matching radios checked and gives the group one tab stop (roving tabindex). */
+function syncRadios(group: ParentNode, checked: (el: HTMLButtonElement) => boolean) {
+  const radios = [...group.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
+  let stop = radios.find((el) => !el.disabled && checked(el));
+  stop ??= radios.find((el) => !el.disabled);
+  for (const el of radios) {
+    el.setAttribute('aria-checked', String(checked(el)));
+    el.tabIndex = el === stop ? 0 : -1;
+  }
+}
+/** Arrow keys, Home and End move through a radio group (or tab list) and select as they go. */
+function arrowKeys(group: HTMLElement, role: 'radio' | 'tab') {
+  const steps: Record<string, number> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
+  group.addEventListener('keydown', (event) => {
+    if (!(event.key in steps) && event.key !== 'Home' && event.key !== 'End') return;
+    const items = [...group.querySelectorAll<HTMLButtonElement>(`[role="${role}"]:not(:disabled)`)];
+    if (!items.length) return;
+    event.preventDefault();
+    const current = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? items.length - 1
+          : (Math.max(current, 0) + steps[event.key] + items.length) % items.length;
+    items[next].focus();
+    items[next].click();
   });
-  document.querySelectorAll<HTMLButtonElement>('[data-paint]').forEach((el) => {
-    const selected = Number(el.dataset.paint) === prefs.paint;
-    el.classList.toggle('selected', selected);
-    el.setAttribute('aria-pressed', String(selected));
+}
+const sameColor = (a: string | undefined, b: string) => a?.toLowerCase() === b.toLowerCase();
+function setDockStatus(kind: '' | 'loading' | 'error', text = '') {
+  const status = $('#dock-status');
+  status.dataset.kind = kind;
+  status.textContent = text;
+  document.body.classList.toggle('car-loading', kind === 'loading');
+}
+function announce(message: string) {
+  // Clear first so repeating the same message is still read out.
+  $('#car-live').textContent = '';
+  requestAnimationFrame(() => ($('#car-live').textContent = message));
+}
+let infoCar: CarId | null = null;
+function refreshShowroom() {
+  const car = carById(prefs.car);
+  const look = prefs.looks[car.id];
+  const track = $('#car-track');
+  syncRadios(track, (el) => el.dataset.car === car.id);
+  track.querySelectorAll<HTMLElement>('[data-car]').forEach((el) => {
+    el.classList.toggle('loading', el.dataset.car === loadingCar);
+    el.classList.toggle('failed', el.dataset.car === failedCar);
   });
-  $('#paint-name').textContent = [
-    prefs.car === 'roadster' ? 'ORIGINAL' : 'VOLT',
-    'CERAMIC',
-    'TITANIUM',
-    'EMBER',
-    'GRAPHITE',
-  ][prefs.paint];
-  const firstPaint = $<HTMLButtonElement>('[data-paint="0"]');
-  firstPaint.style.setProperty('--paint', prefs.car === 'roadster' ? '#a8b0ae' : '#d7ed65');
-  firstPaint.setAttribute(
-    'aria-label',
-    prefs.car === 'roadster' ? 'Original finish' : 'Volt paint',
+  // Car info panel: class badge, name, rank and segmented stat bars.
+  if (infoCar !== car.id) {
+    $('#ci-tier').innerHTML = tierBadge(car.tier);
+    $('#ci-class').textContent = `CLASS ${car.tier}`;
+    $('#ci-stars').innerHTML = stars(car.stars);
+    $('#ci-stars-text').textContent = `${car.stars} of 5 stars`;
+    $('#ci-name').innerHTML = `<span>${car.name}</span>`;
+    $('#ci-name').toggleAttribute('data-long', longName(car) !== '');
+    $('#ci-trim').textContent = car.trim;
+    $('#ci-tagline').textContent = car.tagline;
+    $('#ci-rank').textContent = String(car.rating);
+    for (const { key, decimals } of STAT_ROWS) {
+      const row = $(`.stat-row[data-stat="${key}"]`);
+      row.querySelector('b')!.textContent = car.stats[key].toFixed(decimals);
+      const lit = litSegments(statFraction(key, car.stats[key]), SEGMENTS);
+      row.querySelectorAll('.seg-bar i').forEach((el, i) => el.classList.toggle('on', i < lit));
+    }
+    $('#car-info').dataset.tier = car.tier;
+    // Restart the entry animation for the newly selected car.
+    $('#car-info').classList.remove('swap');
+    void $('#car-info').offsetWidth;
+    $('#car-info').classList.add('swap');
+    infoCar = car.id;
+  }
+  // Paint: quick swatches, the paint shop grid, finish chips and rims.
+  document
+    .querySelectorAll<HTMLElement>('.swatches[role="radiogroup"]:not(#rim-swatches)')
+    .forEach((group) => syncRadios(group, (el) => sameColor(el.dataset.body, look.body)));
+  syncRadios($('.finish-chips'), (el) => el.dataset.finish === look.finish);
+  syncRadios($('#rim-swatches'), (el) => sameColor(el.dataset.rim, look.rim));
+  const bodyName = colorName(look.body).toUpperCase();
+  const finish = FINISHES.find(({ id }) => id === look.finish)!;
+  // Paint picked while the next car is still on its way lands with it, so say so.
+  const pending = loadingCar === car.id && shownCar !== null;
+  $('#quick-paint-name').textContent = pending ? `${bodyName} · ON ARRIVAL` : bodyName;
+  $('#body-name').textContent = bodyName;
+  $('#finish-name').textContent = finish.label;
+  $('#rim-name').textContent = car.rims ? colorName(look.rim, RIM_COLORS).toUpperCase() : 'N/A';
+  // Swatches, finish previews and the spec chip show the car's own paint for Factory.
+  document.body.style.setProperty('--factory', car.factoryHex);
+  $('.paint-shop').style.setProperty('--paint', shownBody(look, car));
+  $('#shop-car').textContent = `/ ${car.name} ${car.trim}`;
+  $('#shop-summary').textContent = lookSummary(look);
+  $('#shop-spec-label').textContent = pending
+    ? `APPLIES WHEN ${car.name} ARRIVES`
+    : car.tintOnly
+      ? 'CURRENT TINT'
+      : 'CURRENT SPEC';
+  $('#shop-rim').textContent = car.rims
+    ? `RIMS · ${colorName(look.rim, RIM_COLORS).toUpperCase()}`
+    : 'RIMS · BAKED IN';
+  $('#tab-body-label').textContent = car.tintOnly ? 'TINT' : 'BODY';
+  $('#body-kind').textContent = car.tintOnly ? 'TINT' : 'COLOUR';
+  $('#tint-note').hidden = !car.tintOnly;
+  const rimGroup = $('#rim-swatches');
+  rimGroup.setAttribute('aria-disabled', String(!car.rims));
+  rimGroup.querySelectorAll<HTMLButtonElement>('button').forEach((el) => (el.disabled = !car.rims));
+  syncRadios(rimGroup, (el) => sameColor(el.dataset.rim, look.rim));
+  $('#rim-note').hidden = car.rims;
+  $('#rim-note').textContent = car.rims
+    ? ''
+    : `THE ${car.name}'S WHEELS ARE PART OF ITS BAKED BODY, SO THERE IS NO SEPARATE RIM TO PAINT.`;
+  // aria-disabled rather than disabled, so keyboard focus stays on the button after a reset.
+  $('#paint-reset').setAttribute('aria-disabled', String(isDefaultLook(look, car)));
+}
+function setShopTab(tab: 'body' | 'rims') {
+  for (const el of document.querySelectorAll<HTMLButtonElement>('.shop-tab')) {
+    const selected = el.dataset.tab === tab;
+    el.setAttribute('aria-selected', String(selected));
+    el.tabIndex = selected ? 0 : -1;
+  }
+  $('#pane-body').hidden = tab !== 'body';
+  $('#pane-rims').hidden = tab !== 'rims';
+  scene.setShowroomFocus(tab === 'rims' ? 'wheels' : 'car');
+}
+/** Paint changes apply live and are remembered per car. */
+function updateLook(change: Partial<CarLook>) {
+  const car = carById(prefs.car);
+  prefs.looks[car.id] = sanitizeLook({ ...prefs.looks[car.id], ...change }, car);
+  // While another model is still loading, the outgoing car keeps its own paint.
+  if (!loadingCar) scene.setLook(prefs.looks[car.id]);
+  save();
+  refreshShowroom();
+  audio.play('click');
+}
+function selectCar(id: CarId) {
+  const car = carById(id);
+  if (car.id === prefs.car && (loadingCar === car.id || shownCar === car.id)) return;
+  prefs.car = car.id;
+  save();
+  loadingCar = car.id;
+  failedCar = null;
+  announceCar = true;
+  if (statusTimeout) clearTimeout(statusTimeout);
+  setDockStatus('loading', `LOADING ${car.name}`);
+  $('#stage-loader-name').textContent = car.name;
+  $('#systems').textContent = 'PREPARING YOUR MACHINE';
+  audio.play('click');
+  refreshShowroom();
+  scrollCardIntoView(car.id);
+  void scene.loadCar(car.model);
+}
+function carLoaded(path: string) {
+  const car = carById(prefs.car);
+  if (path !== car.model) return;
+  // Paint the new model as it lands, so the outgoing car never wears the incoming look.
+  scene.setLook(prefs.looks[car.id]);
+  shownCar = car.id;
+  loadingCar = null;
+  $('#systems').textContent = 'SYSTEMS ONLINE';
+  if ($('#dock-status').dataset.kind === 'loading') setDockStatus('');
+  document.body.classList.remove('car-loading');
+  if (announceCar)
+    announce(`${car.name} ${car.trim} ready. Class ${car.tier}, rank ${car.rating}.`);
+  announceCar = false;
+  refreshShowroom();
+}
+function carFailed(path: string) {
+  const failed = carById(prefs.car);
+  if (path !== failed.model) return;
+  loadingCar = null;
+  failedCar = failed.id;
+  announceCar = false;
+  // Back to the car on screen; on a failed first load, to the default car (already cached).
+  const fallbackId =
+    shownCar && shownCar !== failed.id ? shownCar : failed.id !== CARS[0].id ? CARS[0].id : null;
+  const fallback = fallbackId ? carById(fallbackId) : null;
+  const message = fallback
+    ? `${failed.name} UNAVAILABLE · BACK IN ${fallback.name}`
+    : `${failed.name} UNAVAILABLE`;
+  setDockStatus('error', message);
+  $('#systems').textContent = 'MODEL UNAVAILABLE';
+  announce(
+    `${failed.name} ${failed.trim} could not be loaded.${fallback ? ` ${shownCar ? 'Staying in' : 'Switching to'} ${fallback.name} ${fallback.trim}.` : ''}`,
   );
-  $('#car-caption').innerHTML =
-    prefs.car === 'roadster' ? 'ROADSTER <span>/ 01</span>' : 'AERO GT <span>/ 02</span>';
+  if (fallback) {
+    prefs.car = fallback.id;
+    save();
+    scene.setLook(prefs.looks[fallback.id]);
+    if (!shownCar) {
+      // Nothing is on screen yet, so the fallback is still a load to wait for.
+      loadingCar = fallback.id;
+      $('#stage-loader-name').textContent = fallback.name;
+      document.body.classList.add('car-loading');
+    }
+    void scene.loadCar(fallback.model);
+  }
+  refreshShowroom();
+  if (statusTimeout) clearTimeout(statusTimeout);
+  statusTimeout = setTimeout(() => {
+    failedCar = null;
+    if ($('#dock-status').dataset.kind === 'error') setDockStatus('');
+    refreshShowroom();
+  }, 4500);
+}
+function scrollCardIntoView(id: CarId) {
+  const track = $('#car-track');
+  const card = track.querySelector<HTMLElement>(`[data-car="${id}"]`);
+  if (!card || track.scrollWidth <= track.clientWidth) return;
+  // The track is positioned, so offsetLeft is the card's place within its scrolling content.
+  const left = card.offsetLeft - (track.clientWidth - card.offsetWidth) / 2;
+  track.scrollTo({
+    left,
+    behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+  });
 }
 function setPanel(next: 'drive' | 'garage') {
   panel = next;
@@ -269,6 +583,10 @@ function setPanel(next: 'drive' | 'garage') {
     .querySelectorAll<HTMLElement>('[data-panel]')
     .forEach((el) => el.classList.toggle('active', el.dataset.panel === next));
   document.body.dataset.panel = next;
+  const rims = $('#tab-rims').getAttribute('aria-selected') === 'true';
+  scene.setShowroomFocus(next === 'garage' && rims ? 'wheels' : 'car');
+  // The carousel narrows beside the paint shop; keep the chosen car in view.
+  requestAnimationFrame(() => scrollCardIntoView(prefs.car));
 }
 function setSound(enabled: boolean) {
   prefs.sound = enabled;
@@ -289,6 +607,7 @@ function setSound(enabled: boolean) {
   }
 }
 function startRun() {
+  if (sim.state.status === 'menu') runPanel = panel;
   if (resultTimeout) clearTimeout(resultTimeout);
   closeDialogs();
   clearInput();
@@ -335,9 +654,9 @@ function goHome() {
   document.body.dataset.mode = 'menu';
   $('#hud').hidden = true;
   $('#touch-controls').hidden = true;
-  setPanel('drive');
+  setPanel(runPanel);
   refreshRecords();
-  $('#start').focus({ preventScroll: true });
+  $(runPanel === 'garage' ? '#garage-start' : '#start').focus({ preventScroll: true });
 }
 function showDialog(name: string) {
   audio.play('click');
@@ -434,26 +753,53 @@ document.querySelectorAll<HTMLDialogElement>('dialog').forEach((dialog) => {
     else dialog.close();
   });
 });
-document.querySelectorAll<HTMLButtonElement>('[data-car]').forEach((el) =>
-  el.addEventListener('click', () => {
-    prefs.car = el.dataset.car as 'roadster' | 'concept';
-    save();
-    refreshGarage();
-    $('#systems').textContent = 'PREPARING YOUR MACHINE';
-    void scene.loadCar(
-      prefs.car === 'concept' ? 'CarConcept.glb' : 'reference/models/roadster_user.glb',
-    );
-  }),
-);
-document.querySelectorAll<HTMLButtonElement>('[data-paint]').forEach((el) =>
-  el.addEventListener('click', () => {
-    prefs.paint = Number(el.dataset.paint);
-    scene.setPaint(prefs.paint);
-    refreshGarage();
-    save();
-    audio.play('click');
-  }),
-);
+// Showroom: car carousel, quick paint and the paint shop.
+$('#car-track').addEventListener('click', (event) => {
+  const card = (event.target as Element).closest<HTMLElement>('[data-car]');
+  if (card) selectCar(carById(card.dataset.car).id);
+});
+$('#car-prev').addEventListener('click', () => selectCar(adjacentCar(prefs.car, -1)));
+$('#car-next').addEventListener('click', () => selectCar(adjacentCar(prefs.car, 1)));
+arrowKeys($('#car-track'), 'radio');
+document.querySelectorAll<HTMLElement>('[role="radiogroup"]:not(#car-track)').forEach((group) => {
+  arrowKeys(group, 'radio');
+  group.addEventListener('click', (event) => {
+    const el = (event.target as Element).closest<HTMLButtonElement>('[role="radio"]');
+    if (!el || el.disabled || el.getAttribute('aria-checked') === 'true') return;
+    if (el.dataset.body) updateLook({ body: el.dataset.body });
+    else if (el.dataset.finish) updateLook({ finish: el.dataset.finish as CarLook['finish'] });
+    else if (el.dataset.rim) updateLook({ rim: el.dataset.rim });
+  });
+});
+arrowKeys($('.shop-tabs'), 'tab');
+document
+  .querySelectorAll<HTMLButtonElement>('.shop-tab')
+  .forEach((el) =>
+    el.addEventListener('click', () => setShopTab(el.dataset.tab as 'body' | 'rims')),
+  );
+$('#paint-reset').addEventListener('click', () => {
+  if ($('#paint-reset').getAttribute('aria-disabled') === 'true') return;
+  const car = carById(prefs.car);
+  updateLook({ ...car.look });
+  announce(`${car.name} paint reset to ${lookSummary(car.look).toLowerCase()}.`);
+});
+$('#customize').addEventListener('click', () => {
+  audio.play('click');
+  setPanel('garage');
+  $<HTMLButtonElement>('.shop-tab[aria-selected="true"]').focus({ preventScroll: true });
+});
+$('#ci-toggle').addEventListener('click', () => {
+  const open = $('#ci-toggle').getAttribute('aria-expanded') !== 'true';
+  $('#ci-toggle').setAttribute('aria-expanded', String(open));
+  $('#car-info').dataset.open = String(open);
+});
+// Keep the info panel parked just above the dock on compact layouts.
+new ResizeObserver(() =>
+  document.documentElement.style.setProperty(
+    '--dock-h',
+    `${Math.ceil($('#showroom-dock').getBoundingClientRect().height)}px`,
+  ),
+).observe($('#showroom-dock'));
 $<HTMLSelectElement>('#quality').value = prefs.quality;
 $('#quality').addEventListener('change', () => {
   prefs.quality = $<HTMLSelectElement>('#quality').value as Preferences['quality'];
@@ -509,22 +855,52 @@ window.addEventListener('focus', () => {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) pauseForFocusLoss();
 });
-window.addEventListener('resize', () => scene.resize());
+window.addEventListener('resize', () => {
+  scene.resize();
+  scrollCardIntoView(prefs.car);
+});
 
 const canvas = $<HTMLCanvasElement>('#scene');
 canvas.addEventListener('pointerdown', (event) => {
+  // In the showroom, dragging the scene spins the car on its turntable.
+  if (sim.state.status === 'menu') {
+    if (showroomDrag || anyDialog() || !event.isPrimary || event.button !== 0) return;
+    if (event.pointerType === 'touch') event.preventDefault();
+    canvas.setPointerCapture(event.pointerId);
+    showroomDrag = { id: event.pointerId, x: event.clientX, time: performance.now() };
+    document.body.classList.add('spinning');
+    return;
+  }
   if (event.pointerType !== 'touch' || sim.state.status !== 'playing') return;
   event.preventDefault();
   canvas.setPointerCapture(event.pointerId);
   gestures.begin(event.pointerId, event.clientX, event.clientY, performance.now());
 });
 canvas.addEventListener('pointermove', (event) => {
+  if (showroomDrag?.id === event.pointerId) {
+    const dx = event.clientX - showroomDrag.x;
+    if (dx) scene.dragMenuYaw(dx * 0.008);
+    showroomDrag.x = event.clientX;
+    showroomDrag.time = performance.now();
+    return;
+  }
   if (event.pointerType !== 'touch') return;
   gestures.move(event.pointerId, event.clientX, event.clientY, performance.now());
 });
-canvas.addEventListener('pointerup', (event) => gestures.end(event.pointerId, performance.now()));
-canvas.addEventListener('pointercancel', (event) => gestures.cancel(event.pointerId));
-canvas.addEventListener('lostpointercapture', (event) => gestures.cancel(event.pointerId));
+const releaseShowroom = (event: PointerEvent) => {
+  if (showroomDrag?.id !== event.pointerId) return false;
+  endShowroomDrag();
+  return true;
+};
+canvas.addEventListener('pointerup', (event) => {
+  if (!releaseShowroom(event)) gestures.end(event.pointerId, performance.now());
+});
+canvas.addEventListener('pointercancel', (event) => {
+  if (!releaseShowroom(event)) gestures.cancel(event.pointerId);
+});
+canvas.addEventListener('lostpointercapture', (event) => {
+  if (!releaseShowroom(event)) gestures.cancel(event.pointerId);
+});
 
 document.querySelectorAll<HTMLButtonElement>('[data-control]').forEach((button) => {
   button.addEventListener('pointerdown', (event) => {
@@ -675,7 +1051,13 @@ function frame(now: number) {
 document.body.dataset.mode = 'menu';
 document.body.dataset.panel = 'drive';
 refreshRecords();
-refreshGarage();
+setShopTab('body');
+refreshShowroom();
+if (loadingCar) {
+  setDockStatus('loading', `LOADING ${carById(loadingCar).name}`);
+  $('#stage-loader-name').textContent = carById(loadingCar).name;
+}
+requestAnimationFrame(() => scrollCardIntoView(prefs.car));
 setSound(prefs.sound);
 requestAnimationFrame(frame);
 
