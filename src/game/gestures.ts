@@ -81,6 +81,8 @@ export class GestureInput {
     return result;
   }
   private pulse(action: keyof Controls, now: number): void {
+    this.pulses = this.pulses.filter((pulse) => pulse.until > now);
+    if (this.pulses.filter((pulse) => pulse.action === action).length >= 2) return;
     const previous = this.pulses.filter((pulse) => pulse.action === action).at(-1);
     const from = Math.max(now, (previous?.until ?? -Infinity) + 50);
     this.pulses.push({ action, from, until: from + 110 });

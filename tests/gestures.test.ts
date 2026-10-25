@@ -60,3 +60,11 @@ test('extra pointers cannot steal control and cancellation clears every active i
   input.reset();
   assert.deepEqual(input.read(90), {});
 });
+
+test('rapid swipes cannot queue steering seconds after the finger is released', () => {
+  const input = new GestureInput();
+  input.begin(1, 0, 100, 0);
+  for (let i = 1; i <= 20; i++) input.move(1, i * 40, 100, i * 5);
+  input.end(1, 110);
+  assert.ok(!input.read(1000).right, 'released input must settle promptly');
+});
