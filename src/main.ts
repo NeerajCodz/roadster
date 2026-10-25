@@ -26,7 +26,7 @@ const icons: Record<string, string> = {
 };
 const icon = (name: string) =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] ?? icons.arrow}</svg>`;
-const brand = `<span class="brand-symbol"><i></i><i></i></span><span class="brand-word">ROADSTER<span>RUSH</span></span>`;
+const brand = `<span class="brand-symbol"><i></i><i></i></span><span class="brand-word">ROASTER<span>SIM</span></span>`;
 type Preferences = {
   sound: boolean;
   quality: 'high' | 'performance';
@@ -71,11 +71,11 @@ const save = () => {
 };
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-  <canvas id="scene" aria-label="3D Roadster Rush game" tabindex="-1"></canvas>
+  <canvas id="scene" aria-label="3D Roaster Sim game" tabindex="-1"></canvas>
   <div class="film-grain" aria-hidden="true"></div>
   <div class="menu-shade" aria-hidden="true"></div>
   <header class="site-header">
-    <button class="brand" id="brand" aria-label="Roadster Rush home">${brand}</button>
+    <button class="brand" id="brand" aria-label="Roaster Sim home">${brand}</button>
     <nav class="main-nav" aria-label="Main navigation">
       <button class="nav-link active" data-panel="drive">THE DRIVE<span>01</span></button>
       <button class="nav-link" data-panel="garage">GARAGE<span>02</span></button>
@@ -495,15 +495,19 @@ window.addEventListener('keydown', (event) => {
   }
 });
 window.addEventListener('keyup', (event) => keys.delete(event.code));
-window.addEventListener('blur', () => {
+function pauseForFocusLoss() {
   clearInput();
+  music.pause();
+  voice.pause();
   pauseRun();
+}
+window.addEventListener('blur', pauseForFocusLoss);
+window.addEventListener('focus', () => {
+  if (!document.hidden && sim.state.status === 'menu' && prefs.sound && audioStarted)
+    track('title');
 });
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    clearInput();
-    pauseRun();
-  }
+  if (document.hidden) pauseForFocusLoss();
 });
 window.addEventListener('resize', () => scene.resize());
 
