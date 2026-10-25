@@ -8,6 +8,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import type { Entity, GameState } from './simulation';
 import { spinWheels } from './vehicle';
+import { carById, FACTORY, FINISH_PARAMS, type CarLook } from './cars';
 import { GANTRY_LAYOUT } from './road-layout';
 import {
   createTrafficLights,
@@ -19,8 +20,13 @@ import {
 
 const asset = (path: string) => `${import.meta.env.BASE_URL}assets/${path}`;
 const ROAD_LENGTH = 800;
-const PAINTS = ['#d7ed65', '#ece9df', '#9bacbb', '#e4633f', '#222b2b'];
-const ORIGINAL_CAR = 'reference/models/roadster_user.glb';
+const PAINT_MATERIAL = /paint|body.*color|carpaint|tripo_material/i;
+const RIM_MATERIAL = /^(?:WheelFace|Rim1|Rim2)$/;
+const FLAME_SLOTS = 4;
+/** Turntable angle that shows a front wheel to the paint-shop camera on the RIMS tab. */
+const RIM_VIEW_YAW = -1.3;
+const wrapAngle = (angle: number) =>
+  THREE.MathUtils.euclideanModulo(angle + Math.PI, Math.PI * 2) - Math.PI;
 const TRAFFIC_TYPES = [
   'sedan',
   'hatch',
@@ -49,8 +55,10 @@ export class GameRenderer {
   private sky: THREE.Mesh;
   private entityMeshes = new Map<number, THREE.Group>();
   private exhausts: THREE.Mesh[] = [];
+  private nozzles: THREE.Mesh[] = [];
   private wheels: THREE.Object3D[] = [];
   private paints: THREE.MeshStandardMaterial[] = [];
+  private rims: THREE.MeshStandardMaterial[] = [];
   private shadow: THREE.Mesh;
   private shield: THREE.Mesh;
   private streaks: THREE.LineSegments;
@@ -60,7 +68,17 @@ export class GameRenderer {
   private disposed = false;
   private modelRequest = 0;
   private loadedModel = '';
-  private paintIndex = 0;
+  private look: CarLook = { ...carById('roadster').look };
+  /** Showroom turntable angle and spin from pointer drags; reset when a run starts. */
+  private menuYaw = 0;
+  private menuYawVelocity = 0;
+  private menuDragging = false;
+  /** The paint shop's RIMS tab pulls the camera in toward the wheels. */
+  private showroomFocus: 'car' | 'wheels' = 'car';
+  private reducedMotion =
+    typeof window.matchMedia === 'function'
+      ? window.matchMedia('(prefers-reduced-motion: reduce)')
+      : null;
   private modelCache = new Map<string, THREE.Group>();
   private modelLoads = new Map<string, Promise<THREE.Group | null>>();
   private trafficTemplates: THREE.Group[] = [];
@@ -76,6 +94,7 @@ export class GameRenderer {
   private fogDay = new THREE.Color('#927b94');
   private fogNight = new THREE.Color('#302a54');
   onModelLoaded?: (name: string) => void;
+  onModelError?: (name: string) => void;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({
@@ -195,7 +214,7 @@ export class GameRenderer {
     this.resize();
     this.camera.position.set(5.5, 2.4, 6.2);
     this.camera.lookAt(-4.5, 0.65, -0.3);
-    void this.loadCar(ORIGINAL_CAR);
+    void this.loadCar(carById('roadster').model);
     void this.loadTraffic();
   }
 
@@ -217,26 +236,30 @@ export class GameRenderer {
         }
         model = (await pending) ?? undefined;
       }
-      if (!model || this.disposed || request !== this.modelRequest) return;
+      if (this.disposed || request !== this.modelRequest) return;
+      if (!model) {
+        this.onModelError?.(path);
+        return;
+      }
       this.player.remove(this.car);
       this.car = model;
       this.wheels = [];
-      this.paints = [];
       const paintMaterials = new Set<THREE.MeshStandardMaterial>();
+      const rimMaterials = new Set<THREE.MeshStandardMaterial>();
       this.car.traverse((object) => {
         if (/^Wheel(?:Front|Rear)[LR]$/i.test(object.name)) this.wheels.push(object);
         if (!(object instanceof THREE.Mesh)) return;
         const mats = Array.isArray(object.material) ? object.material : [object.material];
         for (const mat of mats) {
-          if (
-            mat instanceof THREE.MeshStandardMaterial &&
-            /paint|body.*color|carpaint|tripo_material/i.test(mat.name)
-          )
-            paintMaterials.add(mat);
+          if (!(mat instanceof THREE.MeshStandardMaterial)) continue;
+          if (PAINT_MATERIAL.test(mat.name)) paintMaterials.add(mat);
+          else if (RIM_MATERIAL.test(mat.name)) rimMaterials.add(mat);
         }
       });
       this.paints = [...paintMaterials];
-      this.setPaint(this.paintIndex);
+      this.rims = [...rimMaterials];
+      this.applyLook();
+      this.layoutThrusters(model.userData.thrusters as THREE.Vector3[] | undefined);
       this.player.add(this.car);
       this.loadedModel = path;
       this.onModelLoaded?.(path);
@@ -270,6 +293,14 @@ export class GameRenderer {
       oriented.position.set(-center.x * scale, -bounds.min.y * scale + 0.03, -center.z * scale);
       model.add(oriented);
       model.userData.bounds = { width: size.x * scale, height: size.y * scale, length: 4.3 };
+      // Models that carry their own thrusters mark each nozzle exit; flames attach there.
+      model.updateMatrixWorld(true);
+      const thrusters: THREE.Vector3[] = [];
+      for (let i = 0; i < FLAME_SLOTS; i++) {
+        const mount = gltf.scene.getObjectByName(`ThrusterMount${i}`);
+        if (mount) thrusters.push(mount.getWorldPosition(new THREE.Vector3()));
+      }
+      if (thrusters.length) model.userData.thrusters = thrusters;
       gltf.scene.traverse((object) => {
         if (!(object instanceof THREE.Mesh)) return;
         object.castShadow = true;
@@ -282,9 +313,20 @@ export class GameRenderer {
             mat.metalness = Math.min(0.6, mat.metalness);
             mat.normalScale.set(0.3, 0.3);
             mat.envMapIntensity = 1.5;
-          } else if (/paint|body.*color|carpaint/i.test(mat.name)) {
+          } else if (/paint/i.test(mat.name) && mat.name !== 'CarPaint') {
             mat.metalness = 0.8;
             mat.roughness = 0.24;
+          }
+          // Remember the authored finish so the paint shop can always restore it.
+          if (PAINT_MATERIAL.test(mat.name) || RIM_MATERIAL.test(mat.name)) {
+            const physical = mat as THREE.MeshPhysicalMaterial;
+            mat.userData.factory = {
+              color: mat.color.clone(),
+              metalness: mat.metalness,
+              roughness: mat.roughness,
+              clearcoat: physical.clearcoat ?? 0,
+              clearcoatRoughness: physical.clearcoatRoughness ?? 0,
+            };
           }
           if (mat.map)
             mat.map.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
@@ -294,7 +336,8 @@ export class GameRenderer {
             mat.color.set('#181b18');
             mat.needsUpdate = true;
           }
-          if (/brakelight/i.test(mat.name)) {
+          // The procedural roadster's `BrakeLight` is already tuned; light the others' lamps.
+          if (/brakelight/i.test(mat.name) && mat.name !== 'BrakeLight') {
             mat.emissive.set('#ff2e0b');
             mat.emissiveIntensity = 2;
           }
@@ -309,12 +352,65 @@ export class GameRenderer {
     }
   }
 
-  setPaint(index: number) {
-    this.paintIndex = index;
-    for (const mat of this.paints)
-      mat.color.set(
-        /tripo_material/i.test(mat.name) && index === 0 ? '#ffffff' : (PAINTS[index] ?? PAINTS[0]),
-      );
+  /** Paint shop: body colour, finish and rim colour for the current (and any later) car. */
+  setLook(look: CarLook) {
+    this.look = { ...look };
+    this.applyLook();
+  }
+
+  private applyLook() {
+    const { body, finish, rim } = this.look;
+    for (const mat of this.paints) {
+      const factory = mat.userData.factory;
+      if (!factory) continue;
+      const params = finish === 'factory' ? factory : FINISH_PARAMS[finish];
+      if (body === FACTORY) mat.color.copy(factory.color);
+      else mat.color.set(body);
+      mat.metalness = params.metalness;
+      mat.roughness = params.roughness;
+      if (mat instanceof THREE.MeshPhysicalMaterial) {
+        mat.clearcoat = params.clearcoat;
+        mat.clearcoatRoughness = params.clearcoatRoughness;
+      }
+    }
+    for (const mat of this.rims) {
+      const factory = mat.userData.factory;
+      if (!factory) continue;
+      if (rim === FACTORY) mat.color.copy(factory.color);
+      else mat.color.set(rim);
+    }
+  }
+
+  /** Showroom turntable: drag deltas in radians, with a release fling. */
+  dragMenuYaw(delta: number) {
+    this.menuDragging = true;
+    this.menuYaw += delta;
+    this.menuYawVelocity = THREE.MathUtils.clamp(delta * 60, -6, 6);
+  }
+  releaseMenuYaw() {
+    this.menuDragging = false;
+  }
+  setShowroomFocus(focus: 'car' | 'wheels') {
+    this.showroomFocus = focus;
+  }
+
+  /** Point the flames at the model's own thruster mounts, or at the generic nozzles. */
+  private layoutThrusters(mounts: THREE.Vector3[] | undefined) {
+    for (const nozzle of this.nozzles) nozzle.visible = !mounts;
+    this.exhausts.forEach((flame, i) => {
+      const base = flame.userData.base as THREE.Vector3;
+      // Cold-gas thrusters vent a pale blue plume; the generic nozzles keep the electric green.
+      (flame.material as THREE.MeshBasicMaterial).color.set(mounts ? '#cfe6ff' : '#d5f4a0');
+      if (mounts) {
+        flame.userData.enabled = i < mounts.length;
+        if (i < mounts.length) base.copy(mounts[i]);
+        flame.userData.radius = 0.32;
+      } else {
+        flame.userData.enabled = i < 2;
+        base.set(i === 0 ? -0.7 : 0.7, 0.4, 2.25);
+        flame.userData.radius = 1;
+      }
+    });
   }
   setQuality(quality: 'high' | 'performance') {
     this.quality = quality;
@@ -361,21 +457,39 @@ export class GameRenderer {
       : THREE.MathUtils.clamp((state.lane * 3.6 - state.x) * -0.065, -0.18, 0.18);
     this.player.rotation.z = rollAngle + lean;
     this.player.rotation.x = menu ? 0 : THREE.MathUtils.clamp(-state.vy * 0.014, -0.12, 0.2);
+    if (menu) {
+      // Drag to spin the car; it coasts, then the garage turntable takes over.
+      if (!this.menuDragging) {
+        this.menuYaw += this.menuYawVelocity * dt;
+        this.menuYawVelocity *= Math.exp(-dt * 2.5);
+        const settled = Math.abs(this.menuYawVelocity) < 0.3;
+        if (garage && this.showroomFocus === 'wheels' && settled) {
+          // RIMS: park the car front three-quarter on to the paint-shop camera so a wheel faces it.
+          const offset = wrapAngle(RIM_VIEW_YAW - this.menuYaw);
+          this.menuYaw += offset * (1 - Math.exp(-dt * 3));
+        } else if (garage && settled && !this.reducedMotion?.matches) this.menuYaw += dt * 0.22;
+      }
+    } else if (this.menuYaw !== 0) {
+      // Unwind the turntable over a few frames rather than snapping the car round.
+      const unwound = wrapAngle(this.menuYaw) * Math.exp(-dt * 6);
+      this.menuYaw = Math.abs(unwound) < 1e-3 ? 0 : unwound;
+      this.menuYawVelocity = 0;
+    }
     this.player.rotation.y = menu
-      ? garage
-        ? Math.sin(this.elapsed * 0.15) * 0.2
-        : 0.12
-      : THREE.MathUtils.clamp((state.lane * 3.6 - state.x) * -0.04, -0.12, 0.12);
+      ? 0.12 + this.menuYaw
+      : THREE.MathUtils.clamp((state.lane * 3.6 - state.x) * -0.04, -0.12, 0.12) + this.menuYaw;
     if (state.status === 'crashed') {
       this.player.rotation.z += Math.sin(this.elapsed * 7) * 0.08;
     }
     const fly = !menu && (state.y > 0.5 || state.boosting);
     for (let i = 0; i < this.exhausts.length; i++) {
       const flame = this.exhausts[i];
-      flame.visible = fly;
+      const base = flame.userData.base as THREE.Vector3;
+      const radius = flame.userData.radius as number;
+      flame.visible = fly && flame.userData.enabled === true;
       const length = (fly ? 1.7 : 0.15) * (0.85 + Math.sin(this.elapsed * 50 + i) * 0.15);
-      flame.scale.set(1, length, 1);
-      flame.position.z = 2.25 + 0.85 * length;
+      flame.scale.set(radius, length, radius);
+      flame.position.set(base.x, base.y, base.z + 0.85 * length);
       (flame.material as THREE.MeshBasicMaterial).opacity = fly ? 0.8 : 0.35;
     }
     if (moving) spinWheels(this.wheels, dt * state.speed);
@@ -395,10 +509,45 @@ export class GameRenderer {
         garage ? 2.6 : 2.4,
         garage ? 6.5 : 6.2,
       );
-      if (portrait) target.set(8, 5.5, 13.5);
-      this.camera.position.lerp(target, 1 - Math.exp(-dt * 2.5));
-      if (portrait) this.camera.lookAt(-0.8, 4.1, 0);
-      else this.camera.lookAt(garage ? -3.9 : -4.5, 0.65, -0.3);
+      // Narrower than 16:10, back off so the turntable car stays clear of the screen edge.
+      target.multiplyScalar(THREE.MathUtils.clamp(1.6 / this.camera.aspect, 1, 1.25));
+      // Portrait stacks the menu over a showroom sheet: centre the car between them, a little
+      // below the middle under the hero copy and higher (seen from above) over the paint shop.
+      if (portrait) target.set(9, garage ? 8.4 : 6.2, 15.2);
+      // RIMS tab: dolly in low and centre the car so the wheels fill the frame.
+      const wheels = garage && this.showroomFocus === 'wheels';
+      // Portrait keeps its height so the car stays in the clear band above the paint sheet.
+      if (wheels) target.set(target.x * 0.62, portrait ? target.y : 1.15, target.z * 0.62);
+      // The paint shop swings round to the sun side: facing the low sun backlit the paint and
+      // bloomed chrome, so colours are judged front-lit instead. Orbiting by angle rather than a
+      // straight lerp keeps the camera clear of the car on the way round, and the aim turns with
+      // it so the car keeps its place in the frame.
+      const pos = this.camera.position;
+      const ease = 1 - Math.exp(-dt * 2.5);
+      const base = Math.atan2(target.x, target.z);
+      let angle = Math.atan2(pos.x, pos.z);
+      const goal = base + (garage ? 2.35 : 0);
+      angle +=
+        (THREE.MathUtils.euclideanModulo(goal - angle + Math.PI, Math.PI * 2) - Math.PI) * ease;
+      const radius = THREE.MathUtils.lerp(
+        Math.hypot(pos.x, pos.z),
+        Math.hypot(target.x, target.z),
+        ease,
+      );
+      pos.set(
+        Math.sin(angle) * radius,
+        THREE.MathUtils.lerp(pos.y, target.y, ease),
+        Math.cos(angle) * radius,
+      );
+      const aimX = portrait ? 0 : wheels ? -1.6 : garage ? -3.9 : -4.5;
+      const aimZ = portrait ? 0 : -0.3;
+      const turn = angle - base;
+      this.camera.lookAt(
+        aimX * Math.cos(turn) + aimZ * Math.sin(turn),
+        // Portrait: the aim follows the camera height so switching panels pans smoothly.
+        portrait ? THREE.MathUtils.clamp(1.6 - (pos.y - 6.2) * 2, -2.8, 1.6) : wheels ? 0.4 : 0.65,
+        aimZ * Math.cos(turn) - aimX * Math.sin(turn),
+      );
       this.camera.fov = 48;
     } else {
       const height = state.y;
@@ -407,8 +556,34 @@ export class GameRenderer {
         4.4 + height * 0.83,
         10.5 + (state.boosting ? 1.4 : 0),
       );
-      this.camera.position.lerp(target, 1 - Math.exp(-dt * (this.lastStatus === 'menu' ? 3.5 : 5)));
-      this.camera.lookAt(state.x * 0.52, 1.2 + height * 0.8, -15);
+      const pos = this.camera.position;
+      const ease = 1 - Math.exp(-dt * (this.lastStatus === 'menu' ? 3.5 : 5));
+      if (pos.z < 2) {
+        // Leaving the paint shop's front view: swing round the car instead of through it.
+        const angle = Math.atan2(pos.x, pos.z);
+        const goal = Math.atan2(target.x, target.z);
+        const next =
+          angle +
+          (THREE.MathUtils.euclideanModulo(goal - angle + Math.PI, Math.PI * 2) - Math.PI) * ease;
+        const radius = THREE.MathUtils.lerp(
+          Math.hypot(pos.x, pos.z),
+          Math.hypot(target.x, target.z),
+          ease,
+        );
+        pos.set(
+          Math.sin(next) * radius,
+          THREE.MathUtils.lerp(pos.y, target.y, ease),
+          Math.cos(next) * radius,
+        );
+      } else pos.lerp(target, ease);
+      // Watch the car while the camera is still swinging round from in front of it, then hand
+      // over to the usual look down the road once it is behind (pos.z is about 10.5 in play).
+      const behind = THREE.MathUtils.smoothstep(pos.z, -2, 8);
+      this.camera.lookAt(
+        THREE.MathUtils.lerp(state.x, state.x * 0.52, behind),
+        THREE.MathUtils.lerp(0.6 + height, 1.2 + height * 0.8, behind),
+        THREE.MathUtils.lerp(0, -15, behind),
+      );
       this.camera.fov = THREE.MathUtils.lerp(
         this.camera.fov,
         state.boosting ? 68 : 58,
@@ -936,7 +1111,11 @@ export class GameRenderer {
       );
       nozzle.rotation.x = Math.PI / 2;
       nozzle.position.set(x, 0.4, 2.25);
+      this.nozzles.push(nozzle);
       group.add(nozzle);
+    }
+    // Enough flames for four built-in thrusters; layoutThrusters decides which burn and where.
+    for (let i = 0; i < FLAME_SLOTS; i++) {
       const flame = new THREE.Mesh(
         new THREE.ConeGeometry(0.15, 1.7, 14, 1, true),
         new THREE.MeshBasicMaterial({
@@ -949,10 +1128,12 @@ export class GameRenderer {
         }),
       );
       flame.rotation.x = Math.PI / 2;
-      flame.position.set(x, 0.4, 3.1);
+      flame.userData.base = new THREE.Vector3();
+      flame.visible = false;
       this.exhausts.push(flame);
       group.add(flame);
     }
+    this.layoutThrusters(undefined);
     return group;
   }
 
