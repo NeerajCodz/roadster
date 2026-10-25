@@ -8,6 +8,7 @@ import { GameRenderer } from './game/renderer';
 import { GameAudio } from './game/audio';
 import { CONTROL_CODES, keyAction } from './game/keyboard';
 import { GestureInput } from './game/gestures';
+import { BODY_COLORS, CARS, carById, sanitizeLook, type CarId, type CarLook } from './game/cars';
 
 const icons: Record<string, string> = {
   arrow: '<path d="M5 19 19 5M5 5h14v14"/>',
@@ -30,18 +31,21 @@ const brand = `<span class="brand-symbol"><i></i><i></i></span><span class="bran
 type Preferences = {
   sound: boolean;
   quality: 'high' | 'performance';
-  paint: number;
-  car: 'roadster' | 'concept';
+  car: CarId;
+  /** Paint shop choices, remembered per car. */
+  looks: Record<CarId, CarLook>;
   bestScore: number;
   bestDistance: number;
   bolts: number;
   runs: number;
 };
+const defaultLooks = () =>
+  Object.fromEntries(CARS.map((car) => [car.id, { ...car.look }])) as Record<CarId, CarLook>;
 const defaults: Preferences = {
   sound: true,
   quality: 'high',
-  paint: 0,
   car: 'roadster',
+  looks: defaultLooks(),
   bestScore: 0,
   bestDistance: 0,
   bolts: 0,
@@ -54,8 +58,10 @@ try {
     ...defaults,
     sound: typeof saved.sound === 'boolean' ? saved.sound : true,
     quality: saved.quality === 'performance' ? 'performance' : 'high',
-    paint: Number.isInteger(saved.paint) && saved.paint >= 0 && saved.paint <= 4 ? saved.paint : 0,
-    car: saved.car === 'concept' ? 'concept' : 'roadster',
+    car: carById(saved.car).id,
+    looks: Object.fromEntries(
+      CARS.map((car) => [car.id, sanitizeLook(saved.looks?.[car.id], car)]),
+    ) as Record<CarId, CarLook>,
   };
   for (const key of ['bestScore', 'bestDistance', 'bolts', 'runs'] as const)
     if (Number.isFinite(saved[key]) && saved[key] >= 0) prefs[key] = saved[key];
@@ -111,7 +117,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         <button class="vehicle-card" data-car="concept"><span>02 / CONCEPT</span><strong>AERO GT</strong><small>PRECISION IN EVERY DETAIL</small></button>
       </div>
       <div class="paint-control"><span class="micro-label">FINISH <b id="paint-name">VOLT</b></span><div class="paint-swatches" role="group" aria-label="Vehicle paint">
-        ${['Volt', 'Ceramic', 'Titanium', 'Ember', 'Graphite'].map((name, i) => `<button class="paint-swatch" data-paint="${i}" style="--paint:${['#d7ed65', '#ece9df', '#9bacbb', '#e4633f', '#222b2b'][i]}" aria-label="${name} paint" title="${name}"></button>`).join('')}
+        ${BODY_COLORS.slice(0, 6).map(({ name, hex }) => `<button class="paint-swatch" data-paint="${hex}" style="--paint:${hex}" aria-label="${name} paint" title="${name}"></button>`).join('')}
       </div></div>
       <button class="primary-button" id="garage-start"><span>TAKE IT FOR A DRIVE</span>${icon('arrow')}</button>
     </section>
@@ -119,18 +125,18 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 
   <aside class="vehicle-caption" id="vehicle-caption"><span class="caption-line"></span><div><span class="micro-label">MEET YOUR ESCAPE</span><strong id="car-caption">ROADSTER <span>/ 01</span></strong><p>ELECTRIC SOUL. UNTAMED SPIRIT.</p></div></aside>
   <div class="scene-coordinate"><span>36° 16′ N &nbsp; 121° 48′ W</span><strong>PACIFIC COAST HIGHWAY</strong></div>
-  <div class="menu-bottom" id="menu-bottom"><div class="controls-preview"><span><kbd>A</kbd><kbd>D</kbd> STEER</span><span><kbd>SPACE</kbd> FLY</span><span><kbd>Q</kbd><kbd>E</kbd> ROLL</span><span><kbd>SHIFT</kbd> BOOST</span></div><span class="edition">A NEW PERSPECTIVE ON THE DAILY DRIVE</span></div>
+  <div class="menu-bottom" id="menu-bottom"><div class="controls-preview"><span><kbd>A</kbd><kbd>D</kbd> STEER</span><span><kbd>SPACE</kbd> FLY</span><span><kbd>Q</kbd><kbd>E</kbd> AIR ROLL</span><span><kbd>SHIFT</kbd> BOOST</span></div><span class="edition">A NEW PERSPECTIVE ON THE DAILY DRIVE</span></div>
   <footer class="site-footer" id="site-footer"><span><i class="tiny-dot"></i> <span id="systems">SYSTEMS ONLINE</span></span><span>BUILT FOR THE OPEN ROAD. <b>AND BEYOND.</b></span><span>VOL. 01 <i class="footer-cross">＋</i></span></footer>
 
   <section class="game-hud" id="hud" hidden aria-label="Game status">
     <div class="hud-score"><span class="micro-label">SCORE</span><strong id="score">000000</strong><div><span id="distance">0.00 KM</span><span class="hud-bolts">${icon('bolt')}<b id="bolts">0</b></span></div></div>
     <div class="route-tag"><span class="status-dot"></span><span>PACIFIC COAST</span><b>NORTHBOUND / ∞</b></div>
     <div class="combo-display" id="combo-display"><span class="micro-label">MULTIPLIER</span><strong id="combo">×1</strong><div class="combo-track"><i id="combo-fill"></i></div></div>
-    <div class="roll-status"><span class="micro-label">BARREL ROLL</span><strong id="roll-ready">READY</strong><div class="combo-track"><i id="roll-fill"></i></div></div>
+    <div class="roll-status"><span class="micro-label">AIR BARREL ROLL</span><strong id="roll-ready">TAKE OFF</strong><div class="combo-track"><i id="roll-fill"></i></div></div>
     <div class="event-toast" id="event-toast" role="status"></div>
     <div class="pickup-effects" id="pickup-effects"></div>
     <div class="bottom-hud"><div class="speed-display"><strong id="speed">158</strong><div><span>KM/H</span><b id="drive-mode">ELECTRIC DRIVE</b></div><div class="speed-bars">${'<i></i>'.repeat(16)}</div></div><div class="air-display"><div><span>${icon('up')} THRUSTER ENERGY</span><strong id="air-number">100<span>%</span></strong></div><div class="air-track"><i id="air-fill"></i></div><p><kbd>SPACE</kbd> HOLD TO FLY <span id="altitude">GROUND LEVEL</span></p></div></div>
-    <div class="game-key-hint"><kbd>W</kbd> BOOST <span>/</span> <kbd>S</kbd> DIVE <span>/</span> <kbd>Q</kbd> <kbd>E</kbd> BARREL ROLL</div>
+    <div class="game-key-hint"><kbd>W</kbd> BOOST <span>/</span> <kbd>S</kbd> DIVE <span>/</span> <kbd>Q</kbd> <kbd>E</kbd> AIR ROLL</div>
   </section>
 
   <div class="touch-controls" id="touch-controls" hidden>
@@ -142,9 +148,9 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <dialog id="help-dialog" class="panel-dialog help-dialog">
     <button class="dialog-close icon-button" aria-label="Close how to play">${icon('close')}</button>
     <div class="eyebrow">DRIVER’S MANUAL / 01</div><h2>NO TRAFFIC.<br><em>JUST POSSIBILITIES.</em></h2><p class="dialog-intro">Go further. Get closer. Take the scenic route above it all.</p>
-    <div class="manual-grid"><div><span>01</span><h3>FIND YOUR LINE</h3><p>Use <kbd>A</kbd> <kbd>D</kbd> or arrow keys to move between five lanes. Hold <kbd>W</kbd> or <kbd>SHIFT</kbd> for a boost.</p></div><div><span>02</span><h3>LEAVE THE ROAD</h3><p>Tap <kbd>SPACE</kbd> to hop. Hold it to fly. Release to descend, or hold <kbd>S</kbd> to dive. Energy refills on the ground.</p></div><div><span>03</span><h3>MAKE IT A CLOSE CALL</h3><p><kbd>Q</kbd> <kbd>E</kbd> barrel roll through danger. Chain near misses and collect bolts to build your score.</p></div><div><span>04</span><h3>GO THE EXTRA MILE</h3><p>Collect air, shields, magnets, double points and rockets. Sky traffic is real—keep watching ahead.</p></div></div>
-    <p class="gesture-help">ON TOUCH: swipe to steer, hold the scene to fly, swipe down to dive, and double-tap to barrel roll. The on-screen buttons work together, too.</p>
-    <div class="manual-note"><span>${icon('shield')} ROLL = BRIEF COLLISION PROTECTION</span><span><kbd>ESC</kbd> PAUSE &nbsp; <kbd>M</kbd> SOUND</span></div>
+    <div class="manual-grid"><div><span>01</span><h3>FIND YOUR LINE</h3><p>Use <kbd>A</kbd> <kbd>D</kbd> or arrow keys to move between five lanes. Hold <kbd>W</kbd> or <kbd>SHIFT</kbd> for a boost.</p></div><div><span>02</span><h3>LEAVE THE ROAD</h3><p>Tap <kbd>SPACE</kbd> to hop. Hold it to fly. Release to descend, or hold <kbd>S</kbd> to dive. Energy refills on the ground.</p></div><div><span>03</span><h3>MAKE IT A CLOSE CALL</h3><p><kbd>Q</kbd> <kbd>E</kbd> barrel roll through danger while airborne. Chain near misses and collect bolts to build your score.</p></div><div><span>04</span><h3>GO THE EXTRA MILE</h3><p>Collect air, shields, magnets, double points and rockets. Sky traffic is real—keep watching ahead.</p></div></div>
+    <p class="gesture-help">ON TOUCH: swipe to steer, hold the scene to fly, swipe down to dive, and double-tap in the air to barrel roll. The on-screen buttons work together, too.</p>
+    <div class="manual-note"><span>${icon('shield')} AIR ROLL = BRIEF COLLISION PROTECTION</span><span><kbd>ESC</kbd> PAUSE &nbsp; <kbd>M</kbd> SOUND</span></div>
     <button class="primary-button dialog-close"><span>GOT IT. LET’S GO.</span>${icon('arrow')}</button>
   </dialog>
 
@@ -172,10 +178,10 @@ try {
 }
 scene.setQuality(prefs.quality);
 scene.onModelLoaded = () => {
-  scene.setPaint(prefs.paint);
   $('#systems').textContent = 'SYSTEMS ONLINE';
 };
-if (prefs.car === 'concept') void scene.loadCar('CarConcept.glb');
+scene.setLook(prefs.looks[prefs.car]);
+void scene.loadCar(carById(prefs.car).model);
 
 const assetPath = (path: string) => `${import.meta.env.BASE_URL}assets/reference/audio/${path}`;
 const music = new Audio(assetPath('music/run.mp3'));
@@ -240,26 +246,16 @@ function refreshGarage() {
     el.classList.toggle('selected', selected);
     el.setAttribute('aria-pressed', String(selected));
   });
+  const look = prefs.looks[prefs.car];
   document.querySelectorAll<HTMLButtonElement>('[data-paint]').forEach((el) => {
-    const selected = Number(el.dataset.paint) === prefs.paint;
+    const selected = el.dataset.paint === look.body;
     el.classList.toggle('selected', selected);
     el.setAttribute('aria-pressed', String(selected));
   });
-  $('#paint-name').textContent = [
-    prefs.car === 'roadster' ? 'ORIGINAL' : 'VOLT',
-    'CERAMIC',
-    'TITANIUM',
-    'EMBER',
-    'GRAPHITE',
-  ][prefs.paint];
-  const firstPaint = $<HTMLButtonElement>('[data-paint="0"]');
-  firstPaint.style.setProperty('--paint', prefs.car === 'roadster' ? '#a8b0ae' : '#d7ed65');
-  firstPaint.setAttribute(
-    'aria-label',
-    prefs.car === 'roadster' ? 'Original finish' : 'Volt paint',
-  );
-  $('#car-caption').innerHTML =
-    prefs.car === 'roadster' ? 'ROADSTER <span>/ 01</span>' : 'AERO GT <span>/ 02</span>';
+  $('#paint-name').textContent =
+    BODY_COLORS.find(({ hex }) => hex === look.body)?.name.toUpperCase() ?? 'FACTORY';
+  const car = carById(prefs.car);
+  $('#car-caption').innerHTML = `${car.name} <span>/ ${car.trim}</span>`;
 }
 function setPanel(next: 'drive' | 'garage') {
   panel = next;
@@ -436,19 +432,19 @@ document.querySelectorAll<HTMLDialogElement>('dialog').forEach((dialog) => {
 });
 document.querySelectorAll<HTMLButtonElement>('[data-car]').forEach((el) =>
   el.addEventListener('click', () => {
-    prefs.car = el.dataset.car as 'roadster' | 'concept';
+    const car = carById(el.dataset.car);
+    prefs.car = car.id;
     save();
     refreshGarage();
     $('#systems').textContent = 'PREPARING YOUR MACHINE';
-    void scene.loadCar(
-      prefs.car === 'concept' ? 'CarConcept.glb' : 'reference/models/roadster_user.glb',
-    );
+    scene.setLook(prefs.looks[car.id]);
+    void scene.loadCar(car.model);
   }),
 );
 document.querySelectorAll<HTMLButtonElement>('[data-paint]').forEach((el) =>
   el.addEventListener('click', () => {
-    prefs.paint = Number(el.dataset.paint);
-    scene.setPaint(prefs.paint);
+    prefs.looks[prefs.car] = { ...prefs.looks[prefs.car], body: el.dataset.paint ?? 'factory' };
+    scene.setLook(prefs.looks[prefs.car]);
     refreshGarage();
     save();
     audio.play('click');
@@ -632,13 +628,20 @@ function frame(now: number) {
     hud.air.style.transform = `scaleX(${s.air / 100})`;
     hud.air.classList.toggle('low', s.air < 20);
     hud.airNumber.innerHTML = `${Math.ceil(s.air)}<span>%</span>`;
+    const rollReadiness = sim.getRollReadiness();
     hud.rollReady.textContent =
-      s.air < 8 ? 'LOW AIR' : s.rollCooldown > 0 ? `${s.rollCooldown.toFixed(1)}s` : 'READY';
-    hud.rollFill.style.transform = `scaleX(${s.air < 8 ? 0 : 1 - Math.min(1, s.rollCooldown / 1.7)})`;
+      rollReadiness === 'grounded'
+        ? 'TAKE OFF'
+        : rollReadiness === 'low-air'
+          ? 'LOW AIR'
+          : rollReadiness === 'cooldown'
+            ? `${s.rollCooldown.toFixed(1)}s`
+            : 'READY';
+    hud.rollFill.style.transform = `scaleX(${rollReadiness === 'grounded' || rollReadiness === 'low-air' ? 0 : 1 - Math.min(1, s.rollCooldown / 1.7)})`;
     for (const button of document.querySelectorAll<HTMLElement>(
       '[data-control="rollLeft"],[data-control="rollRight"]',
     ))
-      button.classList.toggle('cooling', s.rollCooldown > 0 || s.air < 8);
+      button.classList.toggle('cooling', rollReadiness !== 'ready');
     hud.altitude.textContent = s.y > 0.5 ? `${s.y.toFixed(1)} M ALTITUDE` : 'GROUND LEVEL';
     const speedAmount = Math.floor((s.speed / 86) * 16);
     document

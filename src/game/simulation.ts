@@ -96,6 +96,8 @@ const freshState = (status: GameStatus): GameState => ({
 
 const LANE_WIDTH = 3.6;
 const ROLL_DURATION = 0.65;
+// A full roll needs enough tyre clearance for the body to rotate above the surface.
+const ROLL_CLEARANCE = Math.hypot(PLAYER_BODY.width / 2, PLAYER_BODY.height);
 // Original model bounds [width, height, length], shared with renderer.ts.
 // Each traffic model is uniformly scaled so its length never exceeds 6 m.
 const TRAFFIC_BOUNDS = [
@@ -199,6 +201,13 @@ export class Simulation {
     this.resolvedGantry = -1;
   }
 
+  getRollReadiness(): 'grounded' | 'low-air' | 'cooldown' | 'ready' {
+    const s = this.state;
+    if (s.y - this.roofFloor() < ROLL_CLEARANCE) return 'grounded';
+    if (s.air < 8) return 'low-air';
+    return s.rollCooldown > 0 ? 'cooldown' : 'ready';
+  }
+
   update(dt: number, controls: Controls): void {
     const s = this.state;
     s.events = [];
@@ -215,10 +224,9 @@ export class Simulation {
     const rollLeft = controls.rollLeft && !this.previous.rollLeft;
     const rollRight = controls.rollRight && !this.previous.rollRight;
     if (
-      s.rollCooldown <= 0 &&
-      s.air >= 8 &&
       controls.rollLeft !== controls.rollRight &&
-      (rollLeft || rollRight)
+      (rollLeft || rollRight) &&
+      this.getRollReadiness() === 'ready'
     ) {
       s.roll = ROLL_DURATION;
       s.rollDirection = rollLeft ? -1 : 1;
@@ -327,6 +335,7 @@ export class Simulation {
       ) {
         s.y = top;
         s.vy = 0;
+        s.roll = 0;
         this.roofId = entity.id;
         entity.passed = true;
         if (!this.riddenRoofs.has(entity.id)) {
@@ -634,6 +643,7 @@ export class Simulation {
     if (s.y >= 18) s.vy = Math.min(s.vy, 0);
     if (s.y === floor) {
       s.vy = 0;
+      s.roll = 0;
       s.air = Math.min(100, s.air + 28 * dt);
     }
   }

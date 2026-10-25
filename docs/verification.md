@@ -13,3 +13,7 @@ Browser checks during development covered desktop and 390×844 mobile layouts, s
 The last production-browser recheck was unavailable because local browser use was disabled in Work settings. Production compilation, HTTP serving, asset checks and all 60 regression tests were verified after the final code changes. Real-device touch playback has not been checked; gesture interpretation has automated coverage.
 
 The user's separate model work under `tools/roadster` was left untouched and excluded from these commits.
+
+## Airborne-only barrel rolls
+
+Regression coverage now rejects Q/E while on the road or resting on a traffic roof, does not queue held ground inputs after takeoff, and ends an active spin on either landing surface. The roll HUD and touch-button availability use the same readiness rule. All 65 tests pass. The production build passes in an isolated snapshot of this fix with the committed renderer. The live checkout build encountered incomplete TypeScript edits in the concurrent model integration; those renderer/model files were preserved. The browser recheck remained unavailable because local browser use is disabled. User model files remain untouched.

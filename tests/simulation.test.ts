@@ -149,7 +149,8 @@ test('flying over ground traffic avoids collision but matching sky traffic hits'
 
 test('barrel roll grants collision protection and cannot repeat from a held key', () => {
   const game = playing();
-  game.state.entities = [obstacle()];
+  game.state.y = 5;
+  game.state.entities = [obstacle({ y: 5 })];
   game.update(1 / 60, controls({ rollLeft: true }));
   assert.equal(game.state.status, 'playing');
   assert.ok(game.state.roll > 0 && game.state.invincible > 0);
@@ -158,9 +159,72 @@ test('barrel roll grants collision protection and cannot repeat from a held key'
   assert.equal(game.state.roll, 0);
   assert.equal(game.state.invincible, 0);
   game.update(1 / 60, controls());
+  game.state.y = 5;
   game.update(1 / 60, controls({ rollRight: true }));
   assert.ok(game.state.roll > 0);
   assert.equal(game.state.rollDirection, 1);
+});
+
+test('Q and E on the road cannot roll, spend air, change lane or award protection and tricks', () => {
+  for (const action of ['rollLeft', 'rollRight'] as const) {
+    const game = playing();
+    game.update(1 / 60, controls({ [action]: true }));
+    assert.equal(game.state.y, 0);
+    assert.equal(game.state.roll, 0);
+    assert.equal(game.state.rollCooldown, 0);
+    assert.equal(game.state.lane, 0);
+    assert.equal(game.state.air, 100);
+    assert.equal(game.state.invincible, 0);
+    assert.equal(game.state.combo, 1);
+    assert.ok(!game.state.events.some((event) => event.type === 'roll'));
+  }
+});
+
+test('holding a rejected ground roll while taking off does not queue a later flip', () => {
+  const game = playing();
+  advance(game, 0.5, controls({ fly: true, rollRight: true }));
+  assert.ok(game.state.y > 2);
+  assert.equal(game.state.roll, 0);
+  assert.equal(game.state.lane, 0);
+  game.update(1 / 60, controls({ fly: true }));
+  game.update(1 / 60, controls({ fly: true, rollRight: true }));
+  assert.ok(game.state.roll > 0, 'pressing again after takeoff accepts an airborne roll');
+});
+
+test('a car resting on a traffic roof cannot barrel roll', () => {
+  const game = playing();
+  game.state.y = 2.21;
+  game.state.vy = -2;
+  game.state.entities = [obstacle({ variant: 4, z: 0 })];
+  game.update(1 / 60, controls());
+  assert.equal(game.state.y, 2.2, 'fixture lands on the van roof');
+  game.update(1 / 60, controls({ rollRight: true }));
+  assert.equal(game.state.roll, 0);
+  assert.equal(game.state.lane, 0);
+  assert.equal(game.state.air, 100);
+});
+
+test('landing on the road immediately stops an active airborne roll', () => {
+  const game = playing();
+  game.state.y = 2;
+  game.state.vy = -20;
+  game.update(1 / 60, controls({ rollRight: true }));
+  assert.ok(game.state.roll > 0);
+  advance(game, 0.15);
+  assert.equal(game.state.y, 0);
+  assert.equal(game.state.roll, 0);
+});
+
+test('landing on a traffic roof immediately stops an active airborne roll', () => {
+  const game = playing();
+  game.state.y = 2.21;
+  game.state.vy = -2;
+  game.state.roll = 0.4;
+  game.state.invincible = 0.5;
+  game.state.entities = [obstacle({ variant: 4, z: 0 })];
+  game.update(1 / 60, controls());
+  assert.equal(game.state.y, 2.2);
+  assert.equal(game.state.roll, 0);
 });
 
 test('shield absorbs one collision and expires; an unprotected later hit crashes', () => {

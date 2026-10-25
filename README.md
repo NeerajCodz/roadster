@@ -26,7 +26,7 @@ Use `npm ci` instead of `npm install` for a reproducible install from the lockfi
 
 ## Play
 
-The car cruises automatically. Keep a clear lane or fly over obstacles; releasing flight lets the car descend. Air refills on the ground. Rolls consume air, move one lane, and provide brief collision protection. Ramps launch the car, and a controlled landing can ride a traffic vehicle's roof. Near misses increase a temporary combo multiplier. Watch for traffic in the air as the run progresses.
+The car cruises automatically. Keep a clear lane or fly over obstacles; releasing flight lets the car descend. Air refills on the ground. Barrel rolls work only while airborne: take off first, then press Q / E. They consume air, move one lane, and provide brief collision protection. Landing on the road or a traffic roof immediately ends the spin. Ramps launch the car, and a controlled landing can ride a traffic vehicle's roof. Near misses increase a temporary combo multiplier. Watch for traffic in the air as the run progresses.
 
 | Action         | Desktop                                 | Touch                 |
 | -------------- | --------------------------------------- | --------------------- |
@@ -41,7 +41,7 @@ The car cruises automatically. Keep a clear lane or fly over obstacles; releasin
 
 Touch supports simultaneous steering and flight inputs. The game pauses when the window loses focus or the page becomes hidden. Audio starts after a user interaction, following browser playback rules.
 
-You can also use the scene itself on touch screens: swipe horizontally to steer, hold to fly, swipe down to dive, and double-tap to roll in your last steering direction. Input cancellation and queued swipe limits prevent stuck controls. The roll readiness meter shows its cooldown and low-energy state.
+You can also use the scene itself on touch screens: swipe horizontally to steer, hold to fly, swipe down to dive, and double-tap while airborne to roll in your last steering direction. Input cancellation and queued swipe limits prevent stuck controls. The roll readiness meter shows its cooldown and low-energy state.
 
 Traffic signals before changing lanes, brakes when following a slower vehicle, and forms aerial pairs and slaloms as difficulty increases. Rolls, near misses, roof rides, and big air build trick chains; each kilometre adds a milestone bonus. Power-ups have readable labels, active timers, and matching audio feedback.
 
