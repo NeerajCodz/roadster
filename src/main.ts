@@ -8,7 +8,6 @@ import { GameRenderer } from './game/renderer';
 import { GameAudio } from './game/audio';
 import { CONTROL_CODES, keyAction } from './game/keyboard';
 import { GestureInput } from './game/gestures';
-import { BODY_COLORS, CARS, carById, sanitizeLook, type CarId, type CarLook } from './game/cars';
 
 const icons: Record<string, string> = {
   arrow: '<path d="M5 19 19 5M5 5h14v14"/>',
@@ -31,21 +30,18 @@ const brand = `<span class="brand-symbol"><i></i><i></i></span><span class="bran
 type Preferences = {
   sound: boolean;
   quality: 'high' | 'performance';
-  car: CarId;
-  /** Paint shop choices, remembered per car. */
-  looks: Record<CarId, CarLook>;
+  paint: number;
+  car: 'roadster' | 'concept';
   bestScore: number;
   bestDistance: number;
   bolts: number;
   runs: number;
 };
-const defaultLooks = () =>
-  Object.fromEntries(CARS.map((car) => [car.id, { ...car.look }])) as Record<CarId, CarLook>;
 const defaults: Preferences = {
   sound: true,
   quality: 'high',
+  paint: 0,
   car: 'roadster',
-  looks: defaultLooks(),
   bestScore: 0,
   bestDistance: 0,
   bolts: 0,
@@ -58,10 +54,8 @@ try {
     ...defaults,
     sound: typeof saved.sound === 'boolean' ? saved.sound : true,
     quality: saved.quality === 'performance' ? 'performance' : 'high',
-    car: carById(saved.car).id,
-    looks: Object.fromEntries(
-      CARS.map((car) => [car.id, sanitizeLook(saved.looks?.[car.id], car)]),
-    ) as Record<CarId, CarLook>,
+    paint: Number.isInteger(saved.paint) && saved.paint >= 0 && saved.paint <= 4 ? saved.paint : 0,
+    car: saved.car === 'concept' ? 'concept' : 'roadster',
   };
   for (const key of ['bestScore', 'bestDistance', 'bolts', 'runs'] as const)
     if (Number.isFinite(saved[key]) && saved[key] >= 0) prefs[key] = saved[key];
@@ -117,7 +111,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         <button class="vehicle-card" data-car="concept"><span>02 / CONCEPT</span><strong>AERO GT</strong><small>PRECISION IN EVERY DETAIL</small></button>
       </div>
       <div class="paint-control"><span class="micro-label">FINISH <b id="paint-name">VOLT</b></span><div class="paint-swatches" role="group" aria-label="Vehicle paint">
-        ${BODY_COLORS.slice(0, 6).map(({ name, hex }) => `<button class="paint-swatch" data-paint="${hex}" style="--paint:${hex}" aria-label="${name} paint" title="${name}"></button>`).join('')}
+        ${['Volt', 'Ceramic', 'Titanium', 'Ember', 'Graphite'].map((name, i) => `<button class="paint-swatch" data-paint="${i}" style="--paint:${['#d7ed65', '#ece9df', '#9bacbb', '#e4633f', '#222b2b'][i]}" aria-label="${name} paint" title="${name}"></button>`).join('')}
       </div></div>
       <button class="primary-button" id="garage-start"><span>TAKE IT FOR A DRIVE</span>${icon('arrow')}</button>
     </section>
@@ -178,10 +172,10 @@ try {
 }
 scene.setQuality(prefs.quality);
 scene.onModelLoaded = () => {
+  scene.setPaint(prefs.paint);
   $('#systems').textContent = 'SYSTEMS ONLINE';
 };
-scene.setLook(prefs.looks[prefs.car]);
-void scene.loadCar(carById(prefs.car).model);
+if (prefs.car === 'concept') void scene.loadCar('CarConcept.glb');
 
 const assetPath = (path: string) => `${import.meta.env.BASE_URL}assets/reference/audio/${path}`;
 const music = new Audio(assetPath('music/run.mp3'));
@@ -246,16 +240,26 @@ function refreshGarage() {
     el.classList.toggle('selected', selected);
     el.setAttribute('aria-pressed', String(selected));
   });
-  const look = prefs.looks[prefs.car];
   document.querySelectorAll<HTMLButtonElement>('[data-paint]').forEach((el) => {
-    const selected = el.dataset.paint === look.body;
+    const selected = Number(el.dataset.paint) === prefs.paint;
     el.classList.toggle('selected', selected);
     el.setAttribute('aria-pressed', String(selected));
   });
-  $('#paint-name').textContent =
-    BODY_COLORS.find(({ hex }) => hex === look.body)?.name.toUpperCase() ?? 'FACTORY';
-  const car = carById(prefs.car);
-  $('#car-caption').innerHTML = `${car.name} <span>/ ${car.trim}</span>`;
+  $('#paint-name').textContent = [
+    prefs.car === 'roadster' ? 'ORIGINAL' : 'VOLT',
+    'CERAMIC',
+    'TITANIUM',
+    'EMBER',
+    'GRAPHITE',
+  ][prefs.paint];
+  const firstPaint = $<HTMLButtonElement>('[data-paint="0"]');
+  firstPaint.style.setProperty('--paint', prefs.car === 'roadster' ? '#a8b0ae' : '#d7ed65');
+  firstPaint.setAttribute(
+    'aria-label',
+    prefs.car === 'roadster' ? 'Original finish' : 'Volt paint',
+  );
+  $('#car-caption').innerHTML =
+    prefs.car === 'roadster' ? 'ROADSTER <span>/ 01</span>' : 'AERO GT <span>/ 02</span>';
 }
 function setPanel(next: 'drive' | 'garage') {
   panel = next;
@@ -432,19 +436,19 @@ document.querySelectorAll<HTMLDialogElement>('dialog').forEach((dialog) => {
 });
 document.querySelectorAll<HTMLButtonElement>('[data-car]').forEach((el) =>
   el.addEventListener('click', () => {
-    const car = carById(el.dataset.car);
-    prefs.car = car.id;
+    prefs.car = el.dataset.car as 'roadster' | 'concept';
     save();
     refreshGarage();
     $('#systems').textContent = 'PREPARING YOUR MACHINE';
-    scene.setLook(prefs.looks[car.id]);
-    void scene.loadCar(car.model);
+    void scene.loadCar(
+      prefs.car === 'concept' ? 'CarConcept.glb' : 'reference/models/roadster_user.glb',
+    );
   }),
 );
 document.querySelectorAll<HTMLButtonElement>('[data-paint]').forEach((el) =>
   el.addEventListener('click', () => {
-    prefs.looks[prefs.car] = { ...prefs.looks[prefs.car], body: el.dataset.paint ?? 'factory' };
-    scene.setLook(prefs.looks[prefs.car]);
+    prefs.paint = Number(el.dataset.paint);
+    scene.setPaint(prefs.paint);
     refreshGarage();
     save();
     audio.play('click');
