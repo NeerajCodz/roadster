@@ -1,5 +1,17 @@
 # Roaster Sim verification
 
+## Road modes and difficulty — 2026-10-31
+
+- All 141 tests pass, including 37 new configuration, road geometry, driving-mode and record tests. The original 104 regressions remain green.
+- Every Normal/Two-way/Opposite × Easy/Medium/Hard combination is exercised for lane limits, grounded NPCs, direction-aware travel, bounded populations, body clearance and ground reward reservations. The two-way fixture rejects NPC divider crossings; head-on movement adds closing speeds and swept collision catches fast passes.
+- Difficulty tests measure actual cruise/boost speeds, flight drain/recharge, traffic populations, hazard counts, pickup rewards and indicator warning time. Easy, Medium and Hard differ in gameplay rather than only their labels.
+- Retry reproduces the same seeded run and preserves its options. Configure rejects changes during play, pause and crash. Records are independently stored for all nine setups, validated on load, and legacy records migrate only to Normal/Medium.
+- Visible road and gantry dimensions match the selected mode. All three modes retain the physical flight gap in their outer lanes. Oncoming headings, local steering/signals and road arrows have geometry regression coverage.
+- Browser checks at 1280×720 and 390×844 covered mode/difficulty selection, Two-way/Hard and Opposite/Easy starts, the four-lane divider and three-lane road, active HUD labels and starting speeds, pause, retry, results, a new separate record, mobile launch and saved settings after reload. Keyboard Enter opens setup. No browser warnings or errors were recorded. The viewport override was reset afterward. Real-device touch was not tested.
+- Browser screenshots are saved in `artifacts/modes/`: `run-setup.png`, `two-way-hard.png` and `opposite-easy.png`.
+- Game and fleet-inspector TypeScript checks, the production build, all 29 asset checks, Prettier and `git diff --check` pass. Production HTTP checks returned 200 for HTML, current bundles and both player models.
+- Mode road/scenery groups are cached for at most three layouts; shared asphalt/billboard textures and all cached groups are covered by renderer teardown. The player's models, showroom, paint shop and generator were preserved.
+
 ## NPC fleet — 2026-10-30
 
 - All 104 regression tests pass. New coverage checks all 24 model bounds and axle layouts, road contact, outward-facing windows, visible service decals with complete UVs, fire-engine equipment clearance, clone-independent wheel animation and pause behavior.

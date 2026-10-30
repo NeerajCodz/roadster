@@ -1,6 +1,6 @@
 # Roaster Sim
 
-A complete browser arcade game built with Three.js, TypeScript, and Vite. Drive a five-lane sunset freeway, lift above traffic with cold-gas thrusters, dive back to the road, and chain barrel rolls and near misses. Collect bolts, air refills, shields, magnets, double points, and rocket boosts while traffic becomes more demanding.
+A complete browser arcade game built with Three.js, TypeScript, and Vite. Choose a one-way, two-way or oncoming sunset freeway, lift above traffic with cold-gas thrusters, dive back to the road, and chain barrel rolls and near misses. Collect bolts, air refills, shields, magnets, double points, and rocket boosts while traffic becomes more demanding.
 
 The game includes an arcade showroom and paint shop with three vehicles, sixteen colours, six finishes and rim colours, responsive desktop and touch controls, a live HUD, pause and results screens, sound settings, graphics settings, and local records. The simulation and interface are implemented in this repository; the original reference media is included locally.
 
@@ -35,6 +35,26 @@ Use `npm ci` instead of `npm install` for a reproducible install from the lockfi
 
 ## Play
 
+Choose **LET'S DRIVE** (or press Enter/Space in the showroom) to open run setup, pick a road and difficulty, then choose **START RUN**. The garage's Drive button opens the same setup. Your selection is remembered. Retry and restart keep the current setup; return to the showroom to change it.
+
+| Road mode | Lanes | Traffic |
+| --- | --- | --- |
+| Normal | 5 | All vehicles travel in your direction. |
+| Two-way | 4 | Two lanes in each direction, separated by double yellow lines. Start on the right; crossing into the opposing carriageway is a risk you can take. |
+| Opposite | 3 | Every NPC approaches head-on. Closing speed adds the NPC's speed to yours. |
+
+NPCs stay on their own side of the two-way divider. Oncoming cars face you, including their headlights and turn signals. Lane limits, road markings, shoulders and overhead sign bounds follow the selected road width.
+
+| Difficulty | Initial cruise | Flight energy use | Ground recharge | Score reward |
+| --- | --- | --- | --- | --- |
+| Easy | 130 km/h | 16% per second | 34% per second | ×0.8 |
+| Medium | 158 km/h | 20% per second | 28% per second | ×1 |
+| Hard | 180 km/h | 24% per second | 24% per second | ×1.5 |
+
+Easy has lighter traffic, more space, longer indicator warnings, more frequent bonus pickups and later aerial formations. Hard adds traffic faster, raises NPC and boost speeds, introduces aerial hazards earlier and demands more careful energy use. Every level retains a safe opening, bounded populations, physical spawn clearance and at least a one-second warning before an NPC lane change. Cruise speed also rises gradually with distance. Normal/Medium preserves the original game balance.
+
+Each of the nine road/difficulty combinations keeps its own score, distance and run records. Existing records migrate into Normal/Medium, and lifetime totals are retained. The active setup appears in the HUD, pause screen and results.
+
 The car cruises automatically. Keep a clear lane or fly over obstacles; releasing flight lets the car descend. Air refills on the ground. Barrel rolls work only while airborne: take off first, then press Q / E. They consume air, move one lane, and provide brief collision protection. Landing on the road or a traffic roof immediately ends the spin. Ramps launch the car, and a controlled landing can ride a traffic vehicle's roof. Near misses increase a temporary combo multiplier. NPC cars stay on the road; watch for flying barricades as the run progresses.
 
 | Action         | Desktop                                 | Touch                 |
@@ -56,7 +76,7 @@ Traffic signals before changing lanes and brakes when following a slower vehicle
 
 The NPC fleet has 24 vehicle types: sedans, hatchbacks, SUVs, taxis, vans, pickups, box trucks, city buses, car transporters, coupes, estates, minivans, executive cars, crossovers, off-roaders, ambulances, police cars, fire engines, school buses, parcel vans, delivery trucks, tankers, flatbeds and articulated freight trucks. Ordinary vehicles use eight paint colours; service vehicles keep their markings. Models have shaped windows, wheel arches, grilles, mirrors, plates and independently rotating wheels, with working brake lights, indicators and emergency beacons.
 
-Traffic builds gradually, targeting up to 42 active NPCs, with a hard limit of 60. Cars cruise faster than heavy trucks and maintain headway behind slower traffic and ground barricades. Crowded packs are staggered well ahead of the player. Buses and trailers retain their full size, including the 16.12 m transporter; collision bounds and lane-change clearance use those dimensions. New traffic spawns beyond the main wave with room around other vehicles, pickups and ramps.
+Traffic builds gradually with targets based on road width and difficulty. Normal/Medium targets up to 42 active NPCs; the absolute limit is 60. Cars cruise faster than heavy trucks and maintain headway behind slower traffic and ground barricades. Crowded packs are staggered well ahead of the player. Buses and trailers retain their full size, including the 16.12 m transporter; collision bounds and lane-change clearance use those dimensions. New traffic spawns beyond the main wave with room around other vehicles, pickups and ramps.
 
 Start the development server and open the [NPC fleet inspector](http://127.0.0.1:5173/tools/traffic/index.html) to view all 24 models, inspect an individual vehicle or switch between front and rear views. Its TypeScript check is `node node_modules/typescript/bin/tsc -p tools/traffic/tsconfig.json`.
 
@@ -72,7 +92,7 @@ To inspect both props side by side, start the development server and open [`/too
 - **Rush Original** is the textured player vehicle from the reference game. Its baked texture can only be tinted.
 - **Aero GT** is the detailed CarConcept model, with PBR materials, a full interior and separate wheels. Its paint and license plate materials are adjusted at runtime.
 - **High Quality** enables shadows and bloom with a higher rendering resolution. **Performance** lowers pixel density and disables those effects.
-- Sound, graphics quality, selected vehicle, each car's paint, finish and rims, best score, best distance, collected bolts, and completed run count are saved in this browser's `localStorage` under `roadster-rush-v1`. Run records update after a crash. Clearing site data resets them. Play remains available when storage is unavailable.
+- Sound, graphics quality, selected vehicle, each car's paint, finish and rims, road/difficulty selection, records for each setup and lifetime totals are saved in this browser's `localStorage` under `roadster-rush-v1`. Run records update after a crash. Clearing site data resets them. Play remains available when storage is unavailable.
 
 ## Architecture
 
@@ -80,6 +100,9 @@ To inspect both props side by side, start the development server and open [`/too
 | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `src/main.ts`                                  | Interface, keyboard and pointer input, dialogs, saved preferences, HUD, music and voice playback     |
 | `src/game/simulation.ts`                       | Seeded, renderer-independent game state, movement, flight, traffic, collisions, scoring, and pickups |
+| `src/game/run-settings.ts`                    | Shared immutable road modes and real difficulty profiles                                             |
+| `src/game/run-records.ts`                     | Validated records for nine run setups and legacy record migration                                    |
+| `src/game/road-layout.ts`, `road-geometry.ts`  | Shared mode-dependent lane markings, road dimensions, gantries and oncoming presentation              |
 | `src/game/renderer.ts`                         | Three.js scene, model loading, freeway and scenery, lighting, effects, camera, and graphics quality  |
 | `src/game/audio.ts`                            | Web Audio engine, wind, thrusters, and gameplay sound effects                                        |
 | `src/game/keyboard.ts`, `src/game/gestures.ts` | Keyboard focus routing and touch gesture interpretation                                              |
