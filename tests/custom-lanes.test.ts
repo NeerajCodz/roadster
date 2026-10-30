@@ -76,7 +76,7 @@ test('one through seven lanes stay centred with constant physical spacing, inclu
 
 for (const mode of modes)
   for (const difficulty of difficulties) {
-    const counts = mode === 'two-way' ? [2, 3, 5, 6, 7] : [1, 2, 6, 7];
+    const counts = mode === 'two-way' ? [2, 3, 4, 5, 6, 7] : [1, 2, 3, 4, 5, 6, 7];
     for (const laneCount of counts) {
       test(`${mode}/${difficulty}/${laneCount} lanes: real start, steering and airborne rolls stay on the selected road`, () => {
         const game = new Simulation(291, { mode, difficulty, laneCount });
@@ -119,7 +119,7 @@ for (const mode of modes)
 test('short custom-road runs keep all bodies grounded, finite and legal with a safe opening', () => {
   for (const mode of modes)
     for (const difficulty of difficulties) {
-      for (const laneCount of mode === 'two-way' ? [2, 3, 5, 6, 7] : [1, 2, 6, 7]) {
+      for (const laneCount of mode === 'two-way' ? [2, 3, 4, 5, 6, 7] : [1, 2, 3, 4, 5, 6, 7]) {
         const game = new Simulation(312, { mode, difficulty, laneCount });
         game.start();
         const lanes = expectedLanes[laneCount];
