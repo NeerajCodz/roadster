@@ -2,6 +2,7 @@ import {
   DEFAULT_RUN_OPTIONS,
   DIFFICULTIES,
   ROAD_MODES,
+  laneCountsFor,
   runKey,
   type RunOptions,
 } from './run-settings';
@@ -14,7 +15,11 @@ export interface RunRecord {
 }
 export type RunRecords = Record<string, RunRecord>;
 const keys = ROAD_MODES.flatMap((mode) =>
-  DIFFICULTIES.map((difficulty) => runKey({ mode: mode.id, difficulty: difficulty.id })),
+  laneCountsFor(mode.id).flatMap((laneCount) =>
+    DIFFICULTIES.map((difficulty) =>
+      runKey({ mode: mode.id, difficulty: difficulty.id, laneCount }),
+    ),
+  ),
 );
 const object = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === 'object' && !Array.isArray(value)

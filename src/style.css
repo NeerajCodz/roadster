@@ -4265,3 +4265,86 @@ input:checked ~ .choice-check {
     gap: 8px;
   }
 }
+
+/* Total road width is an explicit choice, including both directions. */
+.lane-choices {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(44px, 56px));
+  gap: 9px;
+}
+.lane-choice {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 46px;
+  cursor: pointer;
+  background: #222c24;
+  border: 1px solid #dce8cc2b;
+  border-radius: 4px;
+  font: 500 17px var(--mono);
+  color: #c2ceb7;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    color 0.15s;
+}
+.lane-choice input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.lane-choice:has(input:checked) {
+  color: #18200e;
+  border-color: var(--volt);
+  background: var(--volt);
+}
+.lane-choice:has(input:focus-visible) {
+  outline: 2px solid var(--volt);
+  outline-offset: 3px;
+}
+.lane-choice:has(input:disabled) {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.lane-explanation {
+  max-width: 660px;
+  margin: 10px 0 0;
+  font-size: 10px;
+  line-height: 1.7;
+  color: #b4c2a7;
+}
+.run-setup-dialog .road-preview i {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 25px;
+  font-size: clamp(14px, 2vw, 23px);
+}
+.run-setup-dialog .setup-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding: 13px 0 2px;
+  background: #19211c;
+  box-shadow: 0 -12px 18px #19211cee;
+}
+.selected-run > b {
+  text-align: left;
+  line-height: 1.6;
+}
+@media (max-width: 650px) {
+  .lane-choices {
+    grid-template-columns: repeat(4, minmax(44px, 1fr));
+    gap: 7px;
+  }
+  .lane-explanation {
+    font-size: 10px;
+  }
+  .run-setup-dialog .setup-actions {
+    padding-top: 12px;
+    padding-bottom: 5px;
+  }
+  .selected-run > span {
+    flex-shrink: 0;
+  }
+}

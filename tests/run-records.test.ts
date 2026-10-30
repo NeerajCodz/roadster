@@ -9,7 +9,7 @@ test('legacy records migrate only into normal medium when there is no per-run re
     bolts: 22,
     runs: 4,
   });
-  assert.equal(Object.keys(records).length, 9);
+  assert.equal(Object.keys(records).length, 60);
   assert.deepEqual(records['normal:medium'], {
     bestScore: 1200,
     bestDistance: 985.5,
@@ -36,7 +36,7 @@ test('corrupt storage is sanitized by profile and unknown keys cannot become lea
     'opposite:easy': null,
     'made-up:hard': { bestScore: 999999 },
   });
-  assert.equal(Object.keys(records).length, 9);
+  assert.equal(Object.keys(records).length, 60);
   assert.deepEqual(records['normal:medium'], { bestScore: 0, bestDistance: 0, bolts: 9, runs: 0 });
   assert.deepEqual(records['two-way:hard'], {
     bestScore: 128,
@@ -46,7 +46,7 @@ test('corrupt storage is sanitized by profile and unknown keys cannot become lea
   });
   for (const corrupt of [null, [], 'broken', 42]) {
     const fresh = sanitizeRunRecords(corrupt);
-    assert.equal(Object.keys(fresh).length, 9);
+    assert.equal(Object.keys(fresh).length, 60);
     assert.equal(fresh['opposite:hard'].bestScore, 0);
   }
 });
@@ -93,4 +93,69 @@ test('invalid completion numbers cannot poison a saved record', () => {
     { score: NaN, distance: -2, bolts: Infinity },
   );
   assert.deepEqual(records['normal:easy'], { bestScore: 0, bestDistance: 0, bolts: 0, runs: 1 });
+});
+
+test('custom lane counts replay independently while the original nine default keys retain their records', () => {
+  const legacy = sanitizeRunRecords(
+    {
+      'normal:medium': { bestScore: 900, bestDistance: 400, runs: 3, bolts: 9 },
+      'two-way:easy': { bestScore: 300, bestDistance: 200, runs: 2, bolts: 5 },
+      'opposite:hard': { bestScore: 600, bestDistance: 120, runs: 1, bolts: 2 },
+    },
+    { bestScore: 99999 },
+  );
+  const narrow = recordRun(
+    legacy,
+    { mode: 'normal', difficulty: 'medium', laneCount: 1 },
+    { score: 1500, distance: 90, bolts: 1 },
+  );
+  const wide = recordRun(
+    narrow,
+    { mode: 'normal', difficulty: 'medium', laneCount: 7 },
+    { score: 120, distance: 600, bolts: 4 },
+  );
+  const replay = recordRun(
+    wide,
+    { mode: 'normal', difficulty: 'medium', laneCount: 1 },
+    { score: 100, distance: 150, bolts: 2 },
+  );
+  assert.deepEqual(replay['normal:medium:1'], {
+    bestScore: 1500,
+    bestDistance: 150,
+    bolts: 3,
+    runs: 2,
+  });
+  assert.deepEqual(replay['normal:medium:7'], {
+    bestScore: 120,
+    bestDistance: 600,
+    bolts: 4,
+    runs: 1,
+  });
+  assert.equal(replay['normal:medium'].bestScore, 900);
+  assert.equal(replay['two-way:easy'].bestScore, 300);
+  assert.equal(replay['opposite:hard'].bestScore, 600);
+  assert.equal(
+    replay['two-way:hard:1'],
+    undefined,
+    'a one-lane two-way road is not a record category',
+  );
+});
+
+test('bad custom keys cannot introduce records or leak overall best into custom roads', () => {
+  const records = sanitizeRunRecords(
+    {
+      'normal:hard:7': { bestScore: 700 },
+      'normal:hard:99': { bestScore: 9999 },
+      'two-way:easy:1': { bestScore: 5000 },
+    },
+    { bestScore: 10000 },
+  );
+  assert.equal(records['normal:hard:7'].bestScore, 700);
+  assert.equal(records['normal:medium'].bestScore, 0);
+  assert.equal(records['normal:hard:99'], undefined);
+  assert.equal(records['two-way:easy:1'], undefined);
+  assert.equal(
+    runRecordFor(records, { mode: 'normal', difficulty: 'hard', laneCount: 1 }).bestScore,
+    0,
+  );
 });

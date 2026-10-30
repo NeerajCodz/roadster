@@ -12,7 +12,10 @@ import {
   DEFAULT_RUN_OPTIONS,
   DIFFICULTIES,
   ROAD_MODES,
+  LANE_COUNTS,
   difficultyFor,
+  directionForLane,
+  roadFor,
   runLabel,
   sanitizeRunOptions,
   type RunOptions,
@@ -283,9 +286,10 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <p id="run-setup-note">Find your rhythm, or test your limits. Every road and difficulty keeps its own records.</p>
     <form id="run-setup-form">
       <fieldset class="setup-field"><legend><span>01</span> ROAD MODE</legend><div class="road-choices">
-        ${ROAD_MODES.map((mode) => `<label class="road-choice"><input type="radio" name="road-mode" value="${mode.id}"><span class="road-preview" aria-hidden="true">${mode.lanes.map((_, i) => `<i${mode.id === 'opposite' || (mode.id === 'two-way' && i < 2) ? ' class="oncoming"' : ''}>${mode.id === 'opposite' || (mode.id === 'two-way' && i < 2) ? '↓' : '↑'}</i>`).join('')}</span><span class="choice-title">${mode.label}<b>${mode.lanes.length} LANES</b></span><span class="choice-description">${mode.description}</span><span class="choice-check" aria-hidden="true">✓</span></label>`).join('')}
+        ${ROAD_MODES.map((mode) => `<label class="road-choice"><input type="radio" name="road-mode" value="${mode.id}"><span class="road-preview" data-preview="${mode.id}" aria-hidden="true"></span><span class="choice-title">${mode.label}<b data-lane-label="${mode.id}"></b></span><span class="choice-description" data-mode-description="${mode.id}"></span><span class="choice-check" aria-hidden="true">✓</span></label>`).join('')}
       </div></fieldset>
-      <fieldset class="setup-field"><legend><span>02</span> DIFFICULTY</legend><div class="difficulty-choices">
+      <fieldset class="setup-field lane-field"><legend><span>02</span> TOTAL LANES</legend><div class="lane-choices">${LANE_COUNTS.map((count) => `<label class="lane-choice"><input type="radio" name="lane-count" value="${count}"><span>${count}</span></label>`).join('')}</div><p class="lane-explanation" id="lane-explanation">Total lanes across the entire road.</p></fieldset>
+      <fieldset class="setup-field"><legend><span>03</span> DIFFICULTY</legend><div class="difficulty-choices">
         ${DIFFICULTIES.map((difficulty) => `<label class="difficulty-choice"><input type="radio" name="difficulty" value="${difficulty.id}"><span class="choice-title">${difficulty.label}<b>×${difficulty.scoreMultiplier} SCORE</b></span><span class="difficulty-stats">${Math.round(difficulty.cruiseSpeed * 3.6)} KM/H CRUISE · ${difficulty.flightDrain}% AIR/S</span><span class="choice-description">${difficulty.description}</span><span class="choice-check" aria-hidden="true">✓</span></label>`).join('')}
       </div></fieldset>
       <div class="setup-summary" aria-live="polite"><div><span class="micro-label" id="setup-record-label"></span><strong id="setup-best"></strong></div><div><span class="micro-label">FURTHEST RUN</span><strong id="setup-distance"></strong></div><p id="setup-run-count"></p></div>
@@ -397,6 +401,7 @@ function refreshRecords() {
 
 let setupReturnFocus: HTMLElement | null = null;
 function refreshRunSetup() {
+  const options = sanitizeRunOptions(prefs.runOptions);
   for (const input of document.querySelectorAll<HTMLInputElement>(
     '#run-setup-form input[name="road-mode"]',
   ))
@@ -405,6 +410,35 @@ function refreshRunSetup() {
     '#run-setup-form input[name="difficulty"]',
   ))
     input.checked = input.value === prefs.runOptions.difficulty;
+  for (const input of document.querySelectorAll<HTMLInputElement>(
+    '#run-setup-form input[name="lane-count"]',
+  )) {
+    input.disabled = options.mode === 'two-way' && input.value === '1';
+    input.checked = Number(input.value) === options.laneCount;
+  }
+  for (const mode of ROAD_MODES) {
+    const road = roadFor(mode.id, options.laneCount);
+    $(`[data-preview="${mode.id}"]`).innerHTML = road.lanes
+      .map((lane) => {
+        const oncoming = directionForLane(mode.id, lane) === -1;
+        return `<i${oncoming ? ' class="oncoming"' : ''}>${oncoming ? '↓' : '↑'}</i>`;
+      })
+      .join('');
+    $(`[data-lane-label="${mode.id}"]`).textContent =
+      `${road.lanes.length} LANE${road.lanes.length === 1 ? '' : 'S'}`;
+    $(`[data-mode-description="${mode.id}"]`).textContent = road.description;
+  }
+  const road = roadFor(options.mode, options.laneCount);
+  const oncoming = road.lanes.filter((lane) => directionForLane(options.mode, lane) === -1).length;
+  $('#lane-explanation').textContent =
+    options.mode === 'two-way'
+      ? `${options.laneCount} total lanes: ${oncoming} oncoming on the left + ${options.laneCount - oncoming} travelling with you. Two-way needs at least two lanes.`
+      : `${options.laneCount} total lane${options.laneCount === 1 ? '' : 's'}, ${options.mode === 'opposite' ? 'all oncoming' : 'all travelling with you'}.`;
+  if (options.laneCount === 2)
+    $('#lane-explanation').textContent +=
+      ' Two narrow lanes — flight may be needed when traffic meets.';
+  else if (options.laneCount === 1)
+    $('#lane-explanation').textContent += ' Use flight to clear traffic.';
   const record = runRecordFor(prefs.runRecords, prefs.runOptions);
   $('#setup-record-label').textContent = `${runLabel(prefs.runOptions).toUpperCase()} / BEST`;
   $('#setup-best').textContent = `${number(record.bestScore)} PTS`;
@@ -784,6 +818,10 @@ $('#run-setup-form').addEventListener('change', () => {
   const options = sanitizeRunOptions({
     mode: $<HTMLInputElement>('#run-setup-form input[name="road-mode"]:checked').value,
     difficulty: $<HTMLInputElement>('#run-setup-form input[name="difficulty"]:checked').value,
+    laneCount: Number(
+      $<HTMLInputElement>('#run-setup-form input[name="lane-count"]:checked')?.value ??
+        sanitizeRunOptions(prefs.runOptions).laneCount,
+    ),
   });
   if (!sim.configure(options)) return;
   prefs.runOptions = options;
