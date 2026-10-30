@@ -5,6 +5,31 @@ import * as presentation from '../src/game/presentation.ts';
 import { updatePlayerPosition } from '../src/game/presentation.ts';
 import { EMPTY_CONTROLS, Simulation } from '../src/game/simulation.ts';
 
+test('discarding an instanced clone frees its buffers without breaking a live sibling or template', () => {
+  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  const material = new THREE.MeshStandardMaterial();
+  const template = new THREE.Group();
+  const source = new THREE.InstancedMesh(geometry, material, 2);
+  template.add(source);
+  const first = template.clone(true);
+  const sibling = template.clone(true);
+  const firstMesh = first.children[0] as THREE.InstancedMesh;
+  const siblingMesh = sibling.children[0] as THREE.InstancedMesh;
+  assert.notEqual(firstMesh.instanceMatrix, siblingMesh.instanceMatrix);
+  let cloneDisposals = 0,
+    sourceDisposals = 0,
+    assetDisposals = 0;
+  firstMesh.addEventListener('dispose', () => cloneDisposals++);
+  source.addEventListener('dispose', () => sourceDisposals++);
+  siblingMesh.addEventListener('dispose', () => sourceDisposals++);
+  geometry.addEventListener('dispose', () => assetDisposals++);
+  material.addEventListener('dispose', () => assetDisposals++);
+  presentation.disposeInstanceBuffers(first);
+  assert.equal(cloneDisposals, 1, 'the rejected clone must release its GPU instance buffers');
+  assert.equal(sourceDisposals, 0, 'live siblings and cached templates remain valid');
+  assert.equal(assetDisposals, 0, 'shared geometry and materials must not be disposed');
+});
+
 test('a lane-change crash is drawn with overlapping vehicle bodies', () => {
   const sim = new Simulation();
   sim.start();

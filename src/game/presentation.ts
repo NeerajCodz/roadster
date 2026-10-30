@@ -112,3 +112,10 @@ export function disposeTrafficLights(lights: TrafficLights): void {
   lights.geometry.dispose();
   lights.material.dispose();
 }
+
+/** Release clone-owned instance buffers while preserving the prototype's shared assets. */
+export function disposeInstanceBuffers(root: THREE.Object3D): void {
+  root.traverse((object) => {
+    if (object instanceof THREE.InstancedMesh) object.dispose();
+  });
+}

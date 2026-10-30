@@ -10,8 +10,10 @@ import type { Entity, GameState } from './simulation';
 import { spinWheels } from './vehicle';
 import { carById, FACTORY, FINISH_PARAMS, type CarLook } from './cars';
 import { GANTRY_LAYOUT } from './road-layout';
+import { animateBarricade, createBarricade } from './barricade';
 import {
   createTrafficLights,
+  disposeInstanceBuffers,
   disposeTrafficLights,
   updatePlayerPosition,
   updateTrafficLights,
@@ -1152,7 +1154,9 @@ export class GameRenderer {
       const key =
         entity.kind === 'traffic'
           ? `traffic:${traffic ? 'original' : 'fallback'}:${variant}`
-          : `${entity.kind}:${entity.pickup ?? ''}`;
+          : entity.kind === 'barrier'
+            ? `barrier:${entity.y > 0 ? 'flying' : 'ground'}`
+            : `${entity.kind}:${entity.pickup ?? ''}`;
       let group = this.entityMeshes.get(entity.id);
       if (group && group.userData.entityKey !== key) {
         this.releaseEntity(group);
@@ -1183,6 +1187,7 @@ export class GameRenderer {
         group.position.y += Math.sin(this.elapsed * 3 + entity.id) * 0.16;
         group.rotation.y += dt * 1.6;
       }
+      if (entity.kind === 'barrier') animateBarricade(group, time + entity.id * 0.21);
     }
   }
 
@@ -1198,6 +1203,7 @@ export class GameRenderer {
     // Clones share their prototype's geometry and material. Only the scene nodes are recycled.
     if (pool.length < 24) pool.push(group);
     else {
+      disposeInstanceBuffers(group);
       const lights = this.trafficLights.get(group);
       if (lights) {
         disposeTrafficLights(lights);
@@ -1218,13 +1224,7 @@ export class GameRenderer {
       return group;
     }
     if (entity.kind === 'barrier') {
-      const barrier = new THREE.Mesh(
-        new THREE.BoxGeometry(3, 1.3, 0.7),
-        new THREE.MeshStandardMaterial({ color: '#d78042', roughness: 0.8 }),
-      );
-      barrier.position.y = 0.65;
-      group.add(barrier);
-      return group;
+      return createBarricade(entity.y > 0);
     }
     const colors: Record<string, string> = {
       bolt: '#dcf569',
@@ -1334,7 +1334,12 @@ export class GameRenderer {
     this.environmentTarget?.dispose();
     this.environmentTarget = null;
     this.disposeObjects(
-      [this.scene, ...this.ownedRoots, ...this.trafficLights.keys()],
+      [
+        this.scene,
+        ...this.ownedRoots,
+        ...this.trafficLights.keys(),
+        ...[...this.entityPools.values()].flat(),
+      ],
       this.textures,
     );
     this.renderer.dispose();
