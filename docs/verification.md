@@ -1,5 +1,17 @@
 # Roaster Sim verification
 
+## NPC fleet — 2026-10-30
+
+- All 104 regression tests pass. New coverage checks all 24 model bounds and axle layouts, road contact, outward-facing windows, visible service decals with complete UVs, fire-engine equipment clearance, clone-independent wheel animation and pause behavior.
+- Four seeded two-minute accelerated runs reach all 24 types, average at least 24 active NPCs after 1.8 km, reach at least 28, stay within the 60-vehicle limit and retain a ground lane at the sampled physical contact positions. Twelve additional long seeded runs verify that NPCs stay grounded and flying barricades retain their varied heights.
+- New ground obstacles leave physical headway and clearance around low reward/ramp routes. A fast car keeps space behind a full-size trailer, and NPCs brake behind grounded barricades. Existing deterministic replay, lane-change warning, rocket-boost safety, roof riding, flight and scoring regressions pass.
+- TypeScript checks pass for the game and `tools/traffic/tsconfig.json`. The Vite production build, all 29 original asset checks, Prettier checks for source/tests/inspector, and `git diff --check` pass.
+- Production HTTP checks return 200 for the game HTML, current JS/CSS bundles and both player models. The fleet inspector HTML and transformed TypeScript respond on the development server.
+- Offline front and rear geometry previews of all 24 models were inspected. Review corrected inward glazing, buried service lettering, hidden fire-engine equipment and traffic/barricade overlap. The preview images are in `artifacts/traffic/` and are software geometry renders, not WebGL screenshots.
+- Live browser inspection could not run because local browser use is disabled in Work settings. GPU appearance, live frame rate and the inspector's controls remain unverified in a browser this turn. Independent agent review was unavailable; the changes received local code review.
+- Geometry is shared by model type, ordinary paint templates are cached by appearance, and individual brake materials remain independent. Dormant NPC clones are capped at two per appearance and 96 total. Overflow and renderer teardown preserve shared resources while releasing instance resources.
+- The user's player models, showroom, paint shop and `tools/roadster` files were preserved. NPC models and markings are generated locally without additional media downloads or dependencies.
+
 ## Barricades — 2026-10-30
 
 - 93 regression tests pass, including grounded NPC traffic across 12 seeded long runs, flying barricade heights/collisions, full frame bounds, exactly two downward boosters and independent pooled-clone animation.
