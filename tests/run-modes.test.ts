@@ -312,3 +312,57 @@ test('pause freezes configured traffic and retry repeats the same seeded run wit
   assert.deepEqual(first.state.options, { mode: 'two-way', difficulty: 'easy' });
   assert.equal(first.state.distance, 0);
 });
+
+test('difficulty changes actual pickup rewards and announced maneuver warning time', () => {
+  const rewards: number[] = [];
+  for (const difficulty of difficulties) {
+    const withBolt = new Simulation(37, { difficulty });
+    const withoutBolt = new Simulation(37, { difficulty });
+    for (const game of [withBolt, withoutBolt]) {
+      game.start();
+      game.state.entities = [];
+    }
+    withBolt.state.entities = [traffic({ kind: 'pickup', pickup: 'bolt', y: 1.15, z: 0 })];
+    for (const game of [withBolt, withoutBolt]) game.update(1 / 120, input());
+    rewards.push(withBolt.state.score - withoutBolt.state.score);
+    const game = new Simulation(37, { difficulty });
+    game.start();
+    const car = traffic({ z: -500 });
+    game.state.entities = [car];
+    let warnedAt: number | undefined, movedAt: number | undefined;
+    for (let i = 0; i < 1800 && movedAt === undefined; i++) {
+      game.state.entities = [car];
+      game.update(1 / 120, input());
+      if (car.signal && warnedAt === undefined) warnedAt = game.state.time;
+      if (car.x !== 0) movedAt = game.state.time;
+    }
+    assert.ok(
+      warnedAt !== undefined && movedAt !== undefined,
+      'a distant driver makes an announced maneuver',
+    );
+    assert.ok(movedAt - warnedAt >= (difficulty === 'easy' ? 1.6 : 1) - 1e-8);
+  }
+  for (const [i, expected] of [20, 25, 37.5].entries())
+    assert.ok(Math.abs(rewards[i] - expected) < 1e-8);
+});
+
+test('each mode collides with its gantry panel and retains the real outer-lane flight gap', () => {
+  for (const road of roads) {
+    for (const outer of [false, true]) {
+      const game = new Simulation(9, { mode: road.mode });
+      game.start();
+      game.state.entities = [];
+      game.state.distance = 98;
+      game.state.y = 10;
+      game.state.vy = 0;
+      game.state.lane = outer ? road.lanes[road.lanes.length - 1] : road.start;
+      game.state.x = game.state.lane * 3.6;
+      game.update(1 / 120, input());
+      assert.equal(
+        game.state.status,
+        outer ? 'playing' : 'crashed',
+        `${road.mode}: ${outer ? 'outside gap' : 'panel'}`,
+      );
+    }
+  }
+});
