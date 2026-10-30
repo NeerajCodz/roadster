@@ -35,15 +35,17 @@ Use `npm ci` instead of `npm install` for a reproducible install from the lockfi
 
 ## Play
 
-Choose **LET'S DRIVE** (or press Enter/Space in the showroom) to open run setup, pick a road and difficulty, then choose **START RUN**. The garage's Drive button opens the same setup. Your selection is remembered. Retry and restart keep the current setup; return to the showroom to change it.
+Choose **LET'S DRIVE** (or press Enter/Space in the showroom) to open run setup, pick a road, total lane count and difficulty, then choose **START RUN**. The garage's Drive button opens the same setup. Your selection is remembered. Retry and restart keep the current setup; return to the showroom to change it.
 
 | Road mode | Lanes | Traffic |
 | --- | --- | --- |
-| Normal | 5 | All vehicles travel in your direction. |
-| Two-way | 4 | Two lanes in each direction, separated by double yellow lines. Start on the right; crossing into the opposing carriageway is a risk you can take. |
-| Opposite | 3 | Every NPC approaches head-on. Closing speed adds the NPC's speed to yours. |
+| Normal | 1–7 | All vehicles travel in your direction. |
+| Two-way | 2–7 total | Oncoming lanes on the left, same-direction lanes on the right, separated by double yellow lines. Odd counts give your side the extra lane: seven means three oncoming and four with you. |
+| Opposite | 1–7 | Every NPC approaches head-on. Closing speed adds the NPC's speed to yours. |
 
 NPCs stay on their own side of the two-way divider. Oncoming cars face you, including their headlights and turn signals. Lane limits, road markings, shoulders and overhead sign bounds follow the selected road width.
+
+Single-lane roads use spaced flight encounters with longer reaction gaps and air pickups. You need to hop or fly over traffic rather than steer around it. Two-lane roads may also require flight when vehicles meet. One lane is disabled in Two-way; switching into Two-way from a single-lane setup selects two. The phone camera follows the car across the full width of a seven-lane road.
 
 | Difficulty | Initial cruise | Flight energy use | Ground recharge | Score reward |
 | --- | --- | --- | --- | --- |
@@ -53,7 +55,7 @@ NPCs stay on their own side of the two-way divider. Oncoming cars face you, incl
 
 Easy has lighter traffic, more space, longer indicator warnings, more frequent bonus pickups and later aerial formations. Hard adds traffic faster, raises NPC and boost speeds, introduces aerial hazards earlier and demands more careful energy use. Every level retains a safe opening, bounded populations, physical spawn clearance and at least a one-second warning before an NPC lane change. Cruise speed also rises gradually with distance. Normal/Medium preserves the original game balance.
 
-Each of the nine road/difficulty combinations keeps its own score, distance and run records. Existing records migrate into Normal/Medium, and lifetime totals are retained. The active setup appears in the HUD, pause screen and results.
+Each of the 60 road/lane-count/difficulty combinations keeps its own score, distance and run records. Existing mode records retain their original default widths (Normal five, Two-way four, Opposite three); older overall records migrate into Normal/five/Medium. Lifetime totals are retained. The active setup appears in the HUD, pause screen and results.
 
 The car cruises automatically. Keep a clear lane or fly over obstacles; releasing flight lets the car descend. Air refills on the ground. Barrel rolls work only while airborne: take off first, then press Q / E. They consume air, move one lane, and provide brief collision protection. Landing on the road or a traffic roof immediately ends the spin. Ramps launch the car, and a controlled landing can ride a traffic vehicle's roof. Near misses increase a temporary combo multiplier. NPC cars stay on the road; watch for flying barricades as the run progresses.
 

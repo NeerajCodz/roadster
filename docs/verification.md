@@ -1,5 +1,16 @@
 # Roaster Sim verification
 
+## Custom lane counts — 2026-10-31
+
+- All 213 tests pass. The suite exercises every valid road/count/difficulty combination: Normal and Opposite with 1–7 lanes, Two-way with 2–7 total lanes, across Easy/Medium/Hard. Coverage includes centred positions, safe openings, edge clamps, legal directions, grounded traffic, body clearance, narrow-road progression and deterministic retry.
+- Single-lane runs generate real NPCs and barricades with longer longitudinal spacing and at least two seconds of birth reaction time in the progression fixture. Their escape is flight. Two-lane roads can also require flight when vehicles meet; sampled ground escape checks apply to roads with three or more lanes.
+- All 20 mode/count layouts have positive road/gantry geometry, correct separators and direction arrows. Camera projection tests cover both outer lanes, flight heights, boost, portrait/landscape screens and rapid seven-lane steering. Empty separator sets allocate no instance buffers.
+- Sixty independent record buckets validate and migrate correctly. The nine original default-width keys are preserved. Invalid saved counts normalize safely, and count changes remain menu-only.
+- Browser checks at 1280×720 and 390×844 verified seven-lane selection and the 3-oncoming/4-with-you split, outer-lane steering with the car visible on a phone, one-lane selection and flight, automatic minimum-two adjustment for Two-way, and seven-lane persistence after reload. No warnings/errors were recorded. The viewport override was reset. Real-device touch was not tested.
+- Screenshots are saved under `artifacts/lanes/`: `setup-seven.png`, `two-way-seven.png`, `seven-lane-phone.png` and `single-lane-flight.png`.
+- Game and fleet-inspector TypeScript checks, the production build, all 29 original asset checks, Prettier and whitespace checks pass. Production HTML, current JS/CSS and both player models return HTTP 200.
+- Rendering caches are keyed by mode and count (at most 20). Asphalt, billboard and gantry sign textures are shared, hills remain global, and cached roots retain teardown ownership. Player assets and showroom behavior were preserved.
+
 ## Road modes and difficulty — 2026-10-31
 
 - All 141 tests pass, including 37 new configuration, road geometry, driving-mode and record tests. The original 104 regressions remain green.
