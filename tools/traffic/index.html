@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Roaster Sim — NPC fleet</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #17211e;
+        color: #e8eee1;
+        font:
+          12px system-ui,
+          sans-serif;
+        overflow: hidden;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      header {
+        position: absolute;
+        top: 20px;
+        left: 24px;
+        right: 24px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        height: 44px;
+      }
+      header strong {
+        font-size: 12px;
+        letter-spacing: 3px;
+        margin-right: auto;
+      }
+      button,
+      select {
+        background: #23312a;
+        color: #dcecce;
+        border: 1px solid #cce0ba40;
+        padding: 9px 12px;
+        font: 10px system-ui;
+        letter-spacing: 0.8px;
+        cursor: pointer;
+      }
+      button:hover {
+        border-color: #dcf569;
+        color: #dcf569;
+      }
+      #cards {
+        position: absolute;
+        inset: 80px 24px 60px;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        grid-template-rows: repeat(3, 1fr);
+        gap: 12px;
+        pointer-events: none;
+      }
+      article {
+        border: 1px solid #cedfbc28;
+        position: relative;
+      }
+      article div {
+        position: absolute;
+        left: 13px;
+        bottom: 11px;
+        right: 10px;
+      }
+      article b {
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 0.8px;
+      }
+      article small {
+        display: block;
+        color: #a4b8a0;
+        font-size: 8px;
+        letter-spacing: 0.8px;
+        margin-top: 4px;
+      }
+      #detail {
+        position: absolute;
+        left: 40px;
+        bottom: 80px;
+        pointer-events: none;
+      }
+      #detail h1 {
+        font-size: 32px;
+        font-weight: 400;
+        letter-spacing: 2px;
+      }
+      #detail p {
+        color: #bbccad;
+        letter-spacing: 1px;
+        font-size: 11px;
+      }
+      footer {
+        position: absolute;
+        left: 24px;
+        bottom: 20px;
+        right: 24px;
+        font-size: 9px;
+        letter-spacing: 1.8px;
+        color: #b9c7aa;
+        display: flex;
+        justify-content: space-between;
+      }
+      a {
+        color: #dcf569;
+        text-decoration: none;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      @media (max-width: 650px) {
+        header {
+          gap: 6px;
+          left: 12px;
+          right: 12px;
+          flex-wrap: wrap;
+          top: 12px;
+          height: 60px;
+        }
+        header strong {
+          width: 100%;
+          font-size: 10px;
+        }
+        button,
+        select {
+          font-size: 7px;
+          padding: 6px;
+        }
+        #cards {
+          inset: 88px 12px 50px;
+          grid-template-columns: repeat(3, 1fr);
+          grid-template-rows: repeat(4, 1fr);
+          gap: 7px;
+        }
+        article div {
+          left: 6px;
+          bottom: 7px;
+        }
+        article b {
+          font-size: 8px;
+        }
+        article small {
+          font-size: 6px;
+        }
+        footer {
+          font-size: 6px;
+          left: 12px;
+          right: 12px;
+        }
+        #detail {
+          left: 20px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <canvas aria-label="Realistic NPC vehicle fleet preview"></canvas>
+    <header>
+      <strong>ROASTER SIM / NPC FLEET</strong
+      ><select id="vehicle" aria-label="Select NPC vehicle"></select
+      ><button id="mode">Inspect vehicle</button><button id="angle">Rear view</button
+      ><button id="previous">Previous page</button><button id="next">Next page</button>
+    </header>
+    <div id="cards"></div>
+    <section id="detail" hidden></section>
+    <footer>
+      <span id="page">24 VEHICLE TYPES / 8 PAINT FINISHES</span><a href="/">BACK TO THE GAME ↗</a>
+    </footer>
+    <script type="module" src="./viewer.ts"></script>
+  </body>
+</html>
