@@ -10,6 +10,14 @@ import type { Entity, GameState } from './simulation';
 import { spinWheels } from './vehicle';
 import { carById, FACTORY, FINISH_PARAMS, type CarLook } from './cars';
 import { GANTRY_LAYOUT } from './road-layout';
+import { LANE_WIDTH, type RoadModeId } from './run-settings';
+import {
+  createRoadGeometry,
+  createGantryGeometry,
+  roadMetrics,
+  trafficRoadPose,
+  ROAD_MARKING_PERIOD,
+} from './road-geometry';
 import { animateBarricade, createBarricade } from './barricade';
 import { TRAFFIC_CATALOG, TRAFFIC_PAINTS, trafficSpec } from './traffic-catalog';
 import { animateTrafficVehicle, createTrafficVehicle } from './traffic-model';
@@ -23,7 +31,6 @@ import {
 } from './presentation';
 
 const asset = (path: string) => `${import.meta.env.BASE_URL}assets/${path}`;
-const ROAD_LENGTH = 800;
 const PAINT_MATERIAL = /paint|body.*color|carpaint|tripo_material/i;
 const RIM_MATERIAL = /^(?:WheelFace|Rim1|Rim2)$/;
 const FLAME_SLOTS = 4;
@@ -43,6 +50,10 @@ export class GameRenderer {
   private output: OutputPass;
   private road = new THREE.Group();
   private scenery = new THREE.Group();
+  private roadMode: RoadModeId | null = null;
+  private roadModes = new Map<RoadModeId, { road: THREE.Group; scenery: THREE.Group }>();
+  private asphalt: THREE.Texture | null = null;
+  private billboardTextures = new Map<number, THREE.Texture>();
   private car = new THREE.Group();
   private sun: THREE.DirectionalLight;
   private sky: THREE.Mesh;
@@ -174,8 +185,8 @@ export class GameRenderer {
       }),
     );
     this.scene.add(this.sky);
-    this.buildRoad();
-    this.buildScenery();
+    this.buildTerrain();
+    this.setRoadMode('normal');
     this.car = this.makeTraffic(0, '#d7ed65');
     this.car.scale.setScalar(1.08);
     this.ownedRoots.add(this.car);
@@ -431,8 +442,9 @@ export class GameRenderer {
     this.elapsed += dt;
     const menu = state.status === 'menu';
     const moving = state.status === 'playing';
+    this.setRoadMode(state.options?.mode ?? 'normal');
     const travel = menu ? this.elapsed * 2 : state.distance;
-    const roadOffset = travel % 24;
+    const roadOffset = travel % ROAD_MARKING_PERIOD;
     this.road.position.z = roadOffset;
     this.scenery.position.z = travel % SCENERY_LENGTH;
     const night = menu ? 0 : Math.pow(Math.sin((state.distance / 4400) * Math.PI), 2) * 0.8;
@@ -446,7 +458,7 @@ export class GameRenderer {
       state.roll > 0 ? state.rollDirection * (1 - state.roll / 0.65) * Math.PI * 2 : 0;
     const lean = menu
       ? 0
-      : THREE.MathUtils.clamp((state.lane * 3.6 - state.x) * -0.065, -0.18, 0.18);
+      : THREE.MathUtils.clamp((state.lane * LANE_WIDTH - state.x) * -0.065, -0.18, 0.18);
     this.player.rotation.z = rollAngle + lean;
     this.player.rotation.x = menu ? 0 : THREE.MathUtils.clamp(-state.vy * 0.014, -0.12, 0.2);
     if (menu) {
@@ -469,7 +481,8 @@ export class GameRenderer {
     }
     this.player.rotation.y = menu
       ? 0.12 + this.menuYaw
-      : THREE.MathUtils.clamp((state.lane * 3.6 - state.x) * -0.04, -0.12, 0.12) + this.menuYaw;
+      : THREE.MathUtils.clamp((state.lane * LANE_WIDTH - state.x) * -0.04, -0.12, 0.12) +
+        this.menuYaw;
     if (state.status === 'crashed') {
       this.player.rotation.z += Math.sin(this.elapsed * 7) * 0.08;
     }
@@ -591,75 +604,52 @@ export class GameRenderer {
     else this.renderer.render(this.scene, this.camera);
   }
 
-  private buildRoad() {
-    const textureCanvas = document.createElement('canvas');
-    textureCanvas.width = textureCanvas.height = 256;
-    const ctx = textureCanvas.getContext('2d')!;
-    ctx.fillStyle = '#393b40';
-    ctx.fillRect(0, 0, 256, 256);
-    let seed = 13;
-    for (let i = 0; i < 28000; i++) {
-      seed = (seed * 16807) % 2147483647;
-      const x = seed % 256;
-      seed = (seed * 16807) % 2147483647;
-      const y = seed % 256;
-      ctx.fillStyle = i % 2 ? 'rgba(15,18,17,.13)' : 'rgba(220,220,210,.10)';
-      ctx.fillRect(x, y, 1, 1);
+  private setRoadMode(mode: RoadModeId) {
+    if (mode === this.roadMode) return;
+    this.scene.remove(this.road, this.scenery);
+    let cached = this.roadModes.get(mode);
+    if (!cached) {
+      this.road = this.buildRoad(mode);
+      this.scenery = new THREE.Group();
+      this.buildScenery(mode);
+      cached = { road: this.road, scenery: this.scenery };
+      this.roadModes.set(mode, cached);
+      this.ownedRoots.add(cached.road);
+      this.ownedRoots.add(cached.scenery);
     }
-    const asphalt = new THREE.CanvasTexture(textureCanvas);
-    asphalt.wrapS = asphalt.wrapT = THREE.RepeatWrapping;
-    asphalt.repeat.set(10, 200);
-    asphalt.colorSpace = THREE.SRGBColorSpace;
-    const road = new THREE.Mesh(
-      new THREE.BoxGeometry(22.5, 0.6, ROAD_LENGTH),
-      new THREE.MeshStandardMaterial({ color: '#747780', roughness: 0.97, map: asphalt }),
-    );
-    road.position.set(0, -0.31, -340);
-    road.receiveShadow = true;
-    this.road.add(road);
-    const lineMaterial = new THREE.MeshStandardMaterial({ color: '#ddd8b7', roughness: 0.9 });
-    const lines = new THREE.InstancedMesh(new THREE.BoxGeometry(0.1, 0.02, 4), lineMaterial, 140);
-    const m = new THREE.Matrix4();
-    let n = 0;
-    for (let z = 60; z > -770; z -= 24)
-      for (const x of [-5.4, -1.8, 1.8, 5.4]) {
-        m.makeTranslation(x, 0.016, z);
-        lines.setMatrixAt(n++, m);
+    this.road = cached.road;
+    this.scenery = cached.scenery;
+    this.scene.add(this.road, this.scenery);
+    this.roadMode = mode;
+  }
+
+  private buildRoad(mode: RoadModeId) {
+    if (!this.asphalt) {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 256;
+      const context = canvas.getContext('2d')!;
+      context.fillStyle = '#393b40';
+      context.fillRect(0, 0, 256, 256);
+      let seed = 13;
+      for (let i = 0; i < 28000; i++) {
+        seed = (seed * 16807) % 2147483647;
+        const x = seed % 256;
+        seed = (seed * 16807) % 2147483647;
+        const y = seed % 256;
+        context.fillStyle = i % 2 ? 'rgba(15,18,17,.13)' : 'rgba(220,220,210,.10)';
+        context.fillRect(x, y, 1, 1);
       }
-    lines.count = n;
-    this.road.add(lines);
-    const stripMat = new THREE.MeshStandardMaterial({ color: '#d4b76d', roughness: 0.65 });
-    for (const x of [-9.4, 9.4]) {
-      const edge = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.025, ROAD_LENGTH), stripMat);
-      edge.position.set(x, 0.025, -340);
-      this.road.add(edge);
-      const curb = new THREE.Mesh(
-        new THREE.BoxGeometry(0.6, 0.5, ROAD_LENGTH),
-        new THREE.MeshStandardMaterial({ color: '#8c8b7b', roughness: 0.9 }),
-      );
-      curb.position.set(x * 1.12, 0.2, -340);
-      this.road.add(curb);
-      const rail = new THREE.Mesh(
-        new THREE.BoxGeometry(0.13, 0.44, ROAD_LENGTH),
-        new THREE.MeshStandardMaterial({ color: '#a5a49a', metalness: 0.75, roughness: 0.4 }),
-      );
-      rail.position.set(x * 1.12, 1, -340);
-      this.road.add(rail);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(10, 200);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      this.asphalt = texture;
+      this.textures.add(texture);
     }
-    const posts = new THREE.InstancedMesh(
-      new THREE.BoxGeometry(0.13, 1.1, 0.18),
-      new THREE.MeshStandardMaterial({ color: '#81847b', metalness: 0.6 }),
-      140,
-    );
-    n = 0;
-    for (let z = 50; z > -780; z -= 12)
-      for (const x of [-10.5, 10.5]) {
-        m.makeTranslation(x, 0.55, z);
-        posts.setMatrixAt(n++, m);
-      }
-    posts.count = n;
-    this.road.add(posts);
-    this.scene.add(this.road);
+    return createRoadGeometry(mode, this.asphalt);
+  }
+
+  private buildTerrain() {
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(3000, 3000),
       new THREE.MeshStandardMaterial({ color: '#3e513f', roughness: 1 }),
@@ -667,12 +657,6 @@ export class GameRenderer {
     ground.rotation.x = -Math.PI / 2;
     ground.position.set(0, -8, -400);
     this.scene.add(ground);
-    const vergeMaterial = new THREE.MeshStandardMaterial({ color: '#40523c', roughness: 1 });
-    for (const x of [-24, 24]) {
-      const verge = new THREE.Mesh(new THREE.BoxGeometry(25, 6, ROAD_LENGTH), vergeMaterial);
-      verge.position.set(x, -5, -340);
-      this.road.add(verge);
-    }
     const ocean = new THREE.Mesh(
       new THREE.PlaneGeometry(1200, 2200),
       new THREE.MeshStandardMaterial({ color: '#587579', metalness: 0.2, roughness: 0.45 }),
@@ -682,7 +666,8 @@ export class GameRenderer {
     this.scene.add(ocean);
   }
 
-  private buildScenery() {
+  private buildScenery(mode: RoadModeId) {
+    const metrics = roadMetrics(mode);
     let seed = 1138;
     const rand = () => {
       seed = (seed * 16807) % 2147483647;
@@ -703,7 +688,7 @@ export class GameRenderer {
       const h = 12 + rand() * 85,
         w = 10 + rand() * 22;
       m.compose(
-        new THREE.Vector3(38 + rand() * 280, h / 2 - 8, -rand() * 950),
+        new THREE.Vector3(38 + metrics.sceneryOffset + rand() * 280, h / 2 - 8, -rand() * 950),
         q,
         new THREE.Vector3(w, h, w * 0.7),
       );
@@ -727,7 +712,7 @@ export class GameRenderer {
     );
     const obj = new THREE.Object3D();
     for (let i = 0; i < 80; i++) {
-      const x = (i % 2 ? -1 : 1) * (15 + rand() * 8),
+      const x = (i % 2 ? -1 : 1) * (15 + metrics.sceneryOffset + rand() * 8),
         z = 65 - i * 12;
       const height = 0.8 + rand() * 0.5;
       m.compose(new THREE.Vector3(x, 5.5 * height - 2, z), q, new THREE.Vector3(1, height, 1));
@@ -763,15 +748,15 @@ export class GameRenderer {
     for (let i = 0; i < 40; i++) {
       const side = i % 2 ? -1 : 1,
         z = 60 - Math.floor(i / 2) * 44;
-      m.makeTranslation(side * 11.7, 5, z);
+      m.makeTranslation(side * metrics.lampX, 5, z);
       lamps.setMatrixAt(i, m);
-      m.makeTranslation(side * 10.2, 10, z);
+      m.makeTranslation(side * (metrics.lampX - 1.5), 10, z);
       arms.setMatrixAt(i, m);
-      m.makeTranslation(side * 9.4, 9.93, z);
+      m.makeTranslation(side * metrics.edgeX, 9.93, z);
       bulbs.setMatrixAt(i, m);
     }
     this.scenery.add(lamps, arms, bulbs);
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < (this.roadModes.size === 0 ? 12 : 0); i++) {
       const hill = new THREE.Mesh(
         new THREE.ConeGeometry(130 + rand() * 140, 70 + rand() * 130, 6),
         new THREE.MeshStandardMaterial({ color: '#928c89', roughness: 1, flatShading: true }),
@@ -781,8 +766,10 @@ export class GameRenderer {
       this.scene.add(hill);
     }
     for (let i = 0; i < GANTRY_LAYOUT.count; i++)
-      this.scenery.add(this.makeSign(-GANTRY_LAYOUT.firstDistance - i * GANTRY_LAYOUT.spacing));
-    for (let i = 0; i < 4; i++) this.scenery.add(this.makeBillboard(i, -150 - i * 220));
+      this.scenery.add(
+        this.makeSign(-GANTRY_LAYOUT.firstDistance - i * GANTRY_LAYOUT.spacing, mode),
+      );
+    for (let i = 0; i < 4; i++) this.scenery.add(this.makeBillboard(i, -150 - i * 220, mode));
     // Two identical kilometre segments let the nearest scenery wrap without popping.
     const nextSegment = this.scenery.clone(true);
     nextSegment.position.z = -SCENERY_LENGTH;
@@ -832,28 +819,7 @@ export class GameRenderer {
     geometry.computeVertexNormals();
     return geometry;
   }
-  private makeSign(z: number) {
-    const group = new THREE.Group();
-    const metal = new THREE.MeshStandardMaterial({
-      color: '#8d9287',
-      metalness: 0.65,
-      roughness: 0.4,
-    });
-    for (const x of [-GANTRY_LAYOUT.beam.width / 2, GANTRY_LAYOUT.beam.width / 2]) {
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.2, 14, 6), metal);
-      pole.position.set(x, 7, z);
-      group.add(pole);
-    }
-    const beam = new THREE.Mesh(
-      new THREE.BoxGeometry(
-        GANTRY_LAYOUT.beam.width,
-        GANTRY_LAYOUT.beam.height,
-        GANTRY_LAYOUT.beam.depth,
-      ),
-      metal,
-    );
-    beam.position.set(0, GANTRY_LAYOUT.beam.y, z);
-    group.add(beam);
+  private makeSign(z: number, mode: RoadModeId) {
     const c = document.createElement('canvas');
     c.width = 1024;
     c.height = 256;
@@ -871,27 +837,15 @@ export class GameRenderer {
     ctx.fillText('↓           OPEN ROAD           ↓', 512, 183);
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
-    const sign = new THREE.Mesh(
-      new THREE.BoxGeometry(
-        GANTRY_LAYOUT.panel.width,
-        GANTRY_LAYOUT.panel.height,
-        GANTRY_LAYOUT.panel.depth,
-      ),
-      [
-        metal,
-        metal,
-        metal,
-        metal,
-        new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8 }),
-        metal,
-      ],
+    const group = createGantryGeometry(
+      mode,
+      new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8 }),
     );
-    sign.position.set(0, GANTRY_LAYOUT.panel.y, z);
-    group.add(sign);
+    group.position.z = z;
     return group;
   }
 
-  private makeBillboard(index: number, z: number) {
+  private makeBillboard(index: number, z: number, mode: RoadModeId) {
     const group = new THREE.Group();
     const metal = new THREE.MeshStandardMaterial({
       color: '#596261',
@@ -906,15 +860,19 @@ export class GameRenderer {
       post.position.set(x, 6.5, -0.1);
       group.add(post);
     }
-    const texture = new THREE.TextureLoader().load(
-      asset(`reference/textures/billboard_${index}.jpg`),
-      (loaded) => {
-        if (this.disposed) loaded.dispose();
-      },
-    );
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = Math.min(4, this.renderer.capabilities.getMaxAnisotropy());
-    this.textures.add(texture);
+    let texture = this.billboardTextures.get(index);
+    if (!texture) {
+      texture = new THREE.TextureLoader().load(
+        asset(`reference/textures/billboard_${index}.jpg`),
+        (loaded) => {
+          if (this.disposed) loaded.dispose();
+        },
+      );
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = Math.min(4, this.renderer.capabilities.getMaxAnisotropy());
+      this.textures.add(texture);
+      this.billboardTextures.set(index, texture);
+    }
     const material = new THREE.MeshStandardMaterial({
       map: texture,
       emissiveMap: texture,
@@ -926,7 +884,7 @@ export class GameRenderer {
     panel.position.set(0, 13, 0.23);
     group.add(panel);
     const side = index % 2 ? -1 : 1;
-    group.position.set(side * 26, 0, z);
+    group.position.set(side * roadMetrics(mode).billboardX, 0, z);
     group.rotation.y = -side * 0.25;
     return group;
   }
@@ -1098,14 +1056,12 @@ export class GameRenderer {
       }
       group.position.set(entity.x, entity.y, entity.z);
       const lights = this.trafficLights.get(group);
-      if (lights) updateTrafficLights(lights, entity, time);
+      const pose = trafficRoadPose(entity);
+      if (lights)
+        updateTrafficLights(lights, { signal: pose.signal, braking: entity.braking }, time);
       if (entity.kind === 'traffic') {
-        const turn =
-          entity.targetLane === undefined
-            ? 0
-            : THREE.MathUtils.clamp((entity.targetLane * 3.6 - entity.x) * -0.04, -0.15, 0.15);
-        animateTrafficVehicle(group, time, entity.speed ?? spec.cruiseSpeed, turn);
-        group.rotation.y = turn * 0.3;
+        animateTrafficVehicle(group, time, entity.speed ?? spec.cruiseSpeed, pose.steer);
+        group.rotation.y = pose.heading;
       }
       if (entity.kind === 'pickup') {
         group.position.y += Math.sin(this.elapsed * 3 + entity.id) * 0.16;
@@ -1312,6 +1268,9 @@ export class GameRenderer {
     this.modelCache.clear();
     this.modelLoads.clear();
     this.trafficTemplates.clear();
+    this.roadModes.clear();
+    this.billboardTextures.clear();
+    this.asphalt = null;
     this.ownedRoots.clear();
     this.textures.clear();
   }
