@@ -9,6 +9,17 @@ import { GameAudio } from './game/audio';
 import { CONTROL_CODES, keyAction } from './game/keyboard';
 import { GestureInput } from './game/gestures';
 import {
+  DEFAULT_RUN_OPTIONS,
+  DIFFICULTIES,
+  ROAD_MODES,
+  difficultyFor,
+  roadFor,
+  runLabel,
+  sanitizeRunOptions,
+  type RunOptions,
+} from './game/run-settings';
+import { recordRun, runRecordFor, sanitizeRunRecords, type RunRecords } from './game/run-records';
+import {
   BODY_COLORS,
   CARS,
   FACTORY,
@@ -93,6 +104,8 @@ type Preferences = {
   bestDistance: number;
   bolts: number;
   runs: number;
+  runOptions: RunOptions;
+  runRecords: RunRecords;
 };
 const defaultLooks = () =>
   Object.fromEntries(CARS.map((car) => [car.id, { ...car.look }])) as Record<CarId, CarLook>;
@@ -105,6 +118,8 @@ const defaults: Preferences = {
   bestDistance: 0,
   bolts: 0,
   runs: 0,
+  runOptions: { ...DEFAULT_RUN_OPTIONS },
+  runRecords: sanitizeRunRecords(undefined),
 };
 let prefs: Preferences = { ...defaults };
 try {
@@ -117,6 +132,8 @@ try {
     looks: Object.fromEntries(
       CARS.map((car) => [car.id, sanitizeLook(saved.looks?.[car.id], car)]),
     ) as Record<CarId, CarLook>,
+    runOptions: sanitizeRunOptions(saved.runOptions),
+    runRecords: sanitizeRunRecords(saved.runRecords, saved),
   };
   for (const key of ['bestScore', 'bestDistance', 'bolts', 'runs'] as const)
     if (Number.isFinite(saved[key]) && saved[key] >= 0) prefs[key] = saved[key];
@@ -157,6 +174,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
       <p class="hero-copy">Gridlock ends where you take off.<br>Find your gap. Hit the thrusters. Own the sky.</p>
       <button class="primary-button start-button" id="start"><span>LET’S DRIVE</span>${icon('arrow')}</button>
       <div class="start-hint"><kbd>SPACE</kbd><span>TO IGNITE YOUR RUN</span><span class="hint-line"></span></div>
+      <button class="selected-run" id="run-profile" aria-label="Change road mode and difficulty"><span>YOUR RUN</span><b id="menu-run-label"></b>${icon('settings')}</button>
       <div class="record-strip">
         <div><span class="micro-label">PERSONAL BEST</span><strong id="menu-best">000000</strong><span class="stat-unit">PTS</span></div>
         <div><span class="micro-label">FURTHEST RUN</span><strong id="menu-distance">0.00</strong><span class="stat-unit">KM</span></div>
@@ -231,7 +249,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 
   <section class="game-hud" id="hud" hidden aria-label="Game status">
     <div class="hud-score"><span class="micro-label">SCORE</span><strong id="score">000000</strong><div><span id="distance">0.00 KM</span><span class="hud-bolts">${icon('bolt')}<b id="bolts">0</b></span></div></div>
-    <div class="route-tag"><span class="status-dot"></span><span>PACIFIC COAST</span><b>NORTHBOUND / ∞</b></div>
+    <div class="route-tag"><span class="status-dot"></span><span>PACIFIC COAST</span><b id="hud-run-label"></b></div>
     <div class="combo-display" id="combo-display"><span class="micro-label">MULTIPLIER</span><strong id="combo">×1</strong><div class="combo-track"><i id="combo-fill"></i></div></div>
     <div class="roll-status"><span class="micro-label">AIR BARREL ROLL</span><strong id="roll-ready">TAKE OFF</strong><div class="combo-track"><i id="roll-fill"></i></div></div>
     <div class="event-toast" id="event-toast" role="status"></div>
@@ -249,25 +267,42 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <dialog id="help-dialog" class="panel-dialog help-dialog">
     <button class="dialog-close icon-button" aria-label="Close how to play">${icon('close')}</button>
     <div class="eyebrow">DRIVER’S MANUAL / 01</div><h2>NO TRAFFIC.<br><em>JUST POSSIBILITIES.</em></h2><p class="dialog-intro">Go further. Get closer. Take the scenic route above it all.</p>
-    <div class="manual-grid"><div><span>01</span><h3>FIND YOUR LINE</h3><p>Use <kbd>A</kbd> <kbd>D</kbd> or arrow keys to move between five lanes. Hold <kbd>W</kbd> or <kbd>SHIFT</kbd> for a boost.</p></div><div><span>02</span><h3>LEAVE THE ROAD</h3><p>Tap <kbd>SPACE</kbd> to hop. Hold it to fly. Release to descend, or hold <kbd>S</kbd> to dive. Energy refills on the ground.</p></div><div><span>03</span><h3>MAKE IT A CLOSE CALL</h3><p><kbd>Q</kbd> <kbd>E</kbd> barrel roll through danger while airborne. Chain near misses and collect bolts to build your score.</p></div><div><span>04</span><h3>GO THE EXTRA MILE</h3><p>Collect air, shields, magnets, double points and rockets. Watch for flying barricades and their downward boosters.</p></div></div>
+    <div class="manual-grid"><div><span>01</span><h3>FIND YOUR LINE</h3><p>Use <kbd>A</kbd> <kbd>D</kbd> or arrow keys to move between the lanes on your selected road. Hold <kbd>W</kbd> or <kbd>SHIFT</kbd> for a boost.</p></div><div><span>02</span><h3>LEAVE THE ROAD</h3><p>Tap <kbd>SPACE</kbd> to hop. Hold it to fly. Release to descend, or hold <kbd>S</kbd> to dive. Energy refills on the ground.</p></div><div><span>03</span><h3>MAKE IT A CLOSE CALL</h3><p><kbd>Q</kbd> <kbd>E</kbd> barrel roll through danger while airborne. Chain near misses and collect bolts to build your score.</p></div><div><span>04</span><h3>GO THE EXTRA MILE</h3><p>Collect air, shields, magnets, double points and rockets. Choose Normal, Two-way or Opposite roads and Easy, Medium or Hard in run setup. Watch for flying barricades and their downward boosters.</p></div></div>
     <p class="gesture-help">ON TOUCH: swipe to steer, hold the scene to fly, swipe down to dive, and double-tap in the air to barrel roll. The on-screen buttons work together, too.</p>
     <div class="manual-note"><span>${icon('shield')} AIR ROLL = BRIEF COLLISION PROTECTION</span><span><kbd>ESC</kbd> PAUSE &nbsp; <kbd>M</kbd> SOUND</span></div>
     <button class="primary-button dialog-close"><span>GOT IT. LET’S GO.</span>${icon('arrow')}</button>
   </dialog>
 
-  <dialog id="settings-dialog" class="panel-dialog settings-dialog"><button class="dialog-close icon-button" aria-label="Close settings">${icon('close')}</button><div class="eyebrow">TUNE YOUR EXPERIENCE</div><h2>THE DETAILS<br><em>MATTER.</em></h2><div class="setting-row"><div><h3>SOUND</h3><p>Engine, soundtrack and the wind.</p></div><button class="toggle-button" id="sound-setting" role="switch" aria-checked="true">ON <i></i></button></div><div class="setting-row"><div><h3>GRAPHICS</h3><p>Find your balance of detail and speed.</p></div><select id="quality" aria-label="Graphics quality"><option value="high">HIGH QUALITY</option><option value="performance">PERFORMANCE</option></select></div><div class="settings-note">Your records, car and paint choices are saved on this device.<br>Three machines: the Roadster (2026), an original procedural build, plus the Rush Original and the Aero GT concept.</div><button class="text-button" data-open="credits">VIEW ASSET CREDITS ${icon('arrow')}</button></dialog>
+  <dialog id="settings-dialog" class="panel-dialog settings-dialog"><button class="dialog-close icon-button" aria-label="Close settings">${icon('close')}</button><div class="eyebrow">TUNE YOUR EXPERIENCE</div><h2>THE DETAILS<br><em>MATTER.</em></h2><div class="setting-row"><div><h3>SOUND</h3><p>Engine, soundtrack and the wind.</p></div><button class="toggle-button" id="sound-setting" role="switch" aria-checked="true">ON <i></i></button></div><div class="setting-row"><div><h3>GRAPHICS</h3><p>Find your balance of detail and speed.</p></div><select id="quality" aria-label="Graphics quality"><option value="high">HIGH QUALITY</option><option value="performance">PERFORMANCE</option></select></div><div class="settings-note">Your road, difficulty, records, car and paint choices are saved on this device.<br>Three machines: the Roadster (2026), an original procedural build, plus the Rush Original and the Aero GT concept.</div><button class="text-button" data-open="credits">VIEW ASSET CREDITS ${icon('arrow')}</button></dialog>
 
   <dialog id="credits-dialog" class="panel-dialog credits-dialog"><button class="dialog-close icon-button" aria-label="Close credits">${icon('close')}</button><div class="eyebrow">UNDER THE HOOD</div><h2>GOOD COMPANY.</h2><p>The Roadster (2026) is an original procedural model built for Roaster Sim in tools/roadster. It uses no third-party assets, so no outside license applies.</p><p>Inspired by Roadster Rush. The Rush Original car, traffic, billboards, soundtrack, voices and Inter font were copied from the public reference at your request.</p><a href="https://roadster-rush.ai.studio/" target="_blank" rel="noopener noreferrer">Roadster Rush reference ${icon('arrow')}</a><p>Aero GT uses CarConcept by Eric Chadwick, © 2024 Darmstadt Graphics Group GmbH, licensed CC BY 4.0. Paint and license plate materials modified.</p><a href="https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CarConcept" target="_blank" rel="noopener noreferrer">CarConcept / Khronos ${icon('arrow')}</a><p>Venice Sunset HDR by Greg Zaal / Poly Haven, CC0. Manrope and Space Grotesk fonts under SIL OFL. Built with Three.js.</p><a href="https://polyhaven.com/a/venice_sunset" target="_blank" rel="noopener noreferrer">Poly Haven ${icon('arrow')}</a></dialog>
 
-  <dialog id="pause-dialog" class="panel-dialog run-dialog"><div class="eyebrow"><span class="status-dot"></span> TAKE A BREATHER</div><h2>THE ROAD<br><em>CAN WAIT.</em></h2><p>Your run is right where you left it.</p><button class="primary-button" id="resume"><span>BACK TO THE DRIVE</span>${icon('arrow')}</button><button class="secondary-button" id="restart">START A FRESH RUN</button><button class="text-button" id="pause-home">BACK TO SHOWROOM</button></dialog>
+  <dialog id="run-setup-dialog" class="panel-dialog run-setup-dialog" aria-labelledby="run-setup-title" aria-describedby="run-setup-note">
+    <button class="icon-button setup-close" id="setup-close" aria-label="Close run setup">${icon('close')}</button>
+    <div class="eyebrow"><span class="status-dot"></span> BEFORE THE THRUSTERS</div>
+    <h2 id="run-setup-title">CHOOSE YOUR <em>ROAD.</em></h2>
+    <p id="run-setup-note">Find your rhythm, or test your limits. Every road and difficulty keeps its own records.</p>
+    <form id="run-setup-form">
+      <fieldset class="setup-field"><legend><span>01</span> ROAD MODE</legend><div class="road-choices">
+        ${ROAD_MODES.map((mode) => `<label class="road-choice"><input type="radio" name="road-mode" value="${mode.id}"><span class="road-preview" aria-hidden="true">${mode.lanes.map((_, i) => `<i${mode.id === 'opposite' || (mode.id === 'two-way' && i < 2) ? ' class="oncoming"' : ''}>${mode.id === 'opposite' || (mode.id === 'two-way' && i < 2) ? '↓' : '↑'}</i>`).join('')}</span><span class="choice-title">${mode.label}<b>${mode.lanes.length} LANES</b></span><span class="choice-description">${mode.description}</span><span class="choice-check" aria-hidden="true">✓</span></label>`).join('')}
+      </div></fieldset>
+      <fieldset class="setup-field"><legend><span>02</span> DIFFICULTY</legend><div class="difficulty-choices">
+        ${DIFFICULTIES.map((difficulty) => `<label class="difficulty-choice"><input type="radio" name="difficulty" value="${difficulty.id}"><span class="choice-title">${difficulty.label}<b>×${difficulty.scoreMultiplier} SCORE</b></span><span class="difficulty-stats">${Math.round(difficulty.cruiseSpeed * 3.6)} KM/H CRUISE · ${difficulty.flightDrain}% AIR/S</span><span class="choice-description">${difficulty.description}</span><span class="choice-check" aria-hidden="true">✓</span></label>`).join('')}
+      </div></fieldset>
+      <div class="setup-summary" aria-live="polite"><div><span class="micro-label" id="setup-record-label"></span><strong id="setup-best"></strong></div><div><span class="micro-label">FURTHEST RUN</span><strong id="setup-distance"></strong></div><p id="setup-run-count"></p></div>
+      <div class="setup-actions"><button class="text-button" type="button" id="setup-cancel">BACK TO SHOWROOM</button><button class="primary-button" type="submit"><span>START RUN</span>${icon('arrow')}</button></div>
+    </form>
+  </dialog>
 
-  <dialog id="results-dialog" class="panel-dialog run-dialog results-dialog"><div class="eyebrow" id="result-eyebrow">ONE FOR THE BOOKS</div><h2>WHAT<br><em>A RIDE.</em></h2><span class="micro-label">FINAL SCORE</span><strong class="result-score" id="result-score">000000</strong><div class="result-stats"><div><span>DISTANCE</span><strong id="result-distance">0.00 <small>KM</small></strong></div><div><span>BOLTS</span><strong id="result-bolts">0</strong></div><div><span>NEAR MISSES</span><strong id="result-near">0</strong></div></div><p class="result-best" id="result-best"></p><button class="primary-button" id="retry"><span>ONE MORE RUN</span>${icon('arrow')}</button><button class="text-button" id="result-home">BACK TO SHOWROOM</button></dialog>
+  <dialog id="pause-dialog" class="panel-dialog run-dialog"><div class="eyebrow"><span class="status-dot"></span> TAKE A BREATHER</div><h2>THE ROAD<br><em>CAN WAIT.</em></h2><p>Your run is right where you left it.</p><p class="run-profile-label" id="pause-run-label"></p><button class="primary-button" id="resume"><span>BACK TO THE DRIVE</span>${icon('arrow')}</button><button class="secondary-button" id="restart">START A FRESH RUN</button><button class="text-button" id="pause-home">BACK TO SHOWROOM</button></dialog>
+
+  <dialog id="results-dialog" class="panel-dialog run-dialog results-dialog"><div class="eyebrow" id="result-eyebrow">ONE FOR THE BOOKS</div><h2>WHAT<br><em>A RIDE.</em></h2><p class="run-profile-label" id="result-run-label"></p><span class="micro-label">FINAL SCORE</span><strong class="result-score" id="result-score">000000</strong><div class="result-stats"><div><span>DISTANCE</span><strong id="result-distance">0.00 <small>KM</small></strong></div><div><span>BOLTS</span><strong id="result-bolts">0</strong></div><div><span>NEAR MISSES</span><strong id="result-near">0</strong></div></div><p class="result-best" id="result-best"></p><button class="primary-button" id="retry"><span>ONE MORE RUN</span>${icon('arrow')}</button><button class="text-button" id="result-home">BACK TO SHOWROOM</button></dialog>
   <div class="fatal-error" id="fatal-error" hidden><div class="eyebrow">A QUICK PIT STOP</div><h2>3D COULDN’T START.</h2><p>Your browser couldn’t create a WebGL context. Enable hardware acceleration or try a WebGL-capable browser.</p><button class="primary-button" onclick="location.reload()">TRY AGAIN</button></div>
 `;
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) =>
   document.querySelector<T>(selector)!;
-const sim = new Simulation(Math.floor(Math.random() * 2147483647));
+const sim = new Simulation(Math.floor(Math.random() * 2147483647), prefs.runOptions);
 const audio = new GameAudio();
 let scene: GameRenderer;
 try {
@@ -355,8 +390,41 @@ const closeDialogs = () =>
   document.querySelectorAll<HTMLDialogElement>('dialog[open]').forEach((dialog) => dialog.close());
 const number = (value: number) => Math.floor(value).toString().padStart(6, '0');
 function refreshRecords() {
-  $('#menu-best').textContent = number(prefs.bestScore);
-  $('#menu-distance').textContent = (prefs.bestDistance / 1000).toFixed(2);
+  const record = runRecordFor(prefs.runRecords, prefs.runOptions);
+  $('#menu-best').textContent = number(record.bestScore);
+  $('#menu-distance').textContent = (record.bestDistance / 1000).toFixed(2);
+  $('#menu-run-label').textContent = runLabel(prefs.runOptions).toUpperCase();
+}
+
+let setupReturnFocus: HTMLElement | null = null;
+function refreshRunSetup() {
+  for (const input of document.querySelectorAll<HTMLInputElement>(
+    '#run-setup-form input[name="road-mode"]',
+  ))
+    input.checked = input.value === prefs.runOptions.mode;
+  for (const input of document.querySelectorAll<HTMLInputElement>(
+    '#run-setup-form input[name="difficulty"]',
+  ))
+    input.checked = input.value === prefs.runOptions.difficulty;
+  const record = runRecordFor(prefs.runRecords, prefs.runOptions);
+  $('#setup-record-label').textContent = `${runLabel(prefs.runOptions).toUpperCase()} / BEST`;
+  $('#setup-best').textContent = `${number(record.bestScore)} PTS`;
+  $('#setup-distance').textContent = `${(record.bestDistance / 1000).toFixed(2)} KM`;
+  $('#setup-run-count').textContent = record.runs
+    ? `${record.runs} COMPLETED RUN${record.runs === 1 ? '' : 'S'} ON THIS SETUP`
+    : 'A NEW ROAD. YOUR FIRST RECORD IS WAITING.';
+}
+function openRunSetup() {
+  if (sim.state.status !== 'menu') return;
+  setupReturnFocus =
+    document.activeElement instanceof HTMLElement ? document.activeElement : $('#start');
+  refreshRunSetup();
+  showDialog('run-setup');
+  $<HTMLInputElement>('#run-setup-form input[name="road-mode"]:checked').focus();
+}
+function closeRunSetup() {
+  $<HTMLDialogElement>('#run-setup-dialog').close();
+  setupReturnFocus?.focus({ preventScroll: true });
 }
 /** Marks the matching radios checked and gives the group one tab stop (roving tabindex). */
 function syncRadios(group: ParentNode, checked: (el: HTMLButtonElement) => boolean) {
@@ -611,7 +679,9 @@ function startRun() {
   if (resultTimeout) clearTimeout(resultTimeout);
   closeDialogs();
   clearInput();
-  sim.start();
+  sim.start(sim.state.status === 'menu' ? prefs.runOptions : sim.state.options);
+  $('#hud-run-label').textContent = runLabel(sim.state.options).toUpperCase();
+  $('#pause-run-label').textContent = runLabel(sim.state.options).toUpperCase();
   lastStatus = 'playing';
   lowAirAnnounced = false;
   peakCombo = 1;
@@ -625,7 +695,7 @@ function startRun() {
     track('run', true);
     speak('start', true);
   }
-  toast('MAKE THE ROAD YOURS', 'PACIFIC COAST / NORTHBOUND');
+  toast(runLabel(sim.state.options).toUpperCase(), 'PACIFIC COAST / ENDLESS RUN');
 }
 function pauseRun() {
   if (sim.state.status !== 'playing') return;
@@ -684,7 +754,9 @@ function crash() {
   $('#impact-flash').classList.add('active');
   setTimeout(() => $('#impact-flash').classList.remove('active'), 240);
   const s = sim.state;
-  const newBest = s.score > prefs.bestScore;
+  const previousRecord = runRecordFor(prefs.runRecords, s.options);
+  const newBest = s.score > previousRecord.bestScore;
+  prefs.runRecords = recordRun(prefs.runRecords, s.options, s);
   prefs.bestScore = Math.max(prefs.bestScore, Math.floor(s.score));
   prefs.bestDistance = Math.max(prefs.bestDistance, s.distance);
   prefs.bolts += s.bolts;
@@ -695,14 +767,35 @@ function crash() {
   $('#result-distance').innerHTML = `${(s.distance / 1000).toFixed(2)} <small>KM</small>`;
   $('#result-bolts').textContent = String(s.bolts);
   $('#result-near').textContent = String(s.nearMisses);
-  $('#result-best').textContent = `BEST ${number(prefs.bestScore)} PTS / PEAK CHAIN ×${peakCombo}`;
+  $('#result-run-label').textContent = runLabel(s.options).toUpperCase();
+  $('#result-best').textContent =
+    `BEST ${number(runRecordFor(prefs.runRecords, s.options).bestScore)} PTS / PEAK CHAIN ×${peakCombo}`;
   resultTimeout = setTimeout(() => {
     if (sim.state.status === 'crashed') $<HTMLDialogElement>('#results-dialog').showModal();
   }, 700);
 }
 
-$('#start').addEventListener('click', startRun);
-$('#garage-start').addEventListener('click', startRun);
+$('#start').addEventListener('click', openRunSetup);
+$('#garage-start').addEventListener('click', openRunSetup);
+$('#run-profile').addEventListener('click', openRunSetup);
+$('#setup-close').addEventListener('click', closeRunSetup);
+$('#setup-cancel').addEventListener('click', closeRunSetup);
+$('#run-setup-form').addEventListener('change', () => {
+  if (sim.state.status !== 'menu') return;
+  const options = sanitizeRunOptions({
+    mode: $<HTMLInputElement>('#run-setup-form input[name="road-mode"]:checked').value,
+    difficulty: $<HTMLInputElement>('#run-setup-form input[name="difficulty"]:checked').value,
+  });
+  if (!sim.configure(options)) return;
+  prefs.runOptions = options;
+  save();
+  refreshRecords();
+  refreshRunSetup();
+});
+$('#run-setup-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (sim.state.status === 'menu') startRun();
+});
 $('#retry').addEventListener('click', startRun);
 $('#restart').addEventListener('click', startRun);
 $('#pause').addEventListener('click', pauseRun);
@@ -750,6 +843,7 @@ document.querySelectorAll<HTMLDialogElement>('dialog').forEach((dialog) => {
     event.preventDefault();
     if (dialog.id === 'results-dialog') goHome();
     else if (sim.state.status === 'paused') resumeRun();
+    else if (dialog.id === 'run-setup-dialog') closeRunSetup();
     else dialog.close();
   });
 });
@@ -821,7 +915,8 @@ window.addEventListener('keydown', (event) => {
       setSound(!prefs.sound);
       break;
     case 'start':
-      startRun();
+      if (sim.state.status === 'menu') openRunSetup();
+      else startRun();
       break;
     case 'pause':
       pauseRun();
@@ -833,7 +928,8 @@ window.addEventListener('keydown', (event) => {
       goHome();
       break;
     case 'close':
-      closeDialogs();
+      if ($<HTMLDialogElement>('#run-setup-dialog').open) closeRunSetup();
+      else closeDialogs();
       break;
     case 'control':
       keys.add(event.code);

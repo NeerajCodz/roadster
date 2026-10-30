@@ -3917,3 +3917,351 @@ body.car-loading .car-info .seg-bar i.on {
     min-height: 30px;
   }
 }
+
+/* Run setup keeps road layout, difficulty and records together before the drive. */
+.selected-run {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  max-width: 100%;
+  margin-top: 15px;
+  padding: 8px 0;
+  background: none;
+  border: 0;
+  color: #c6d0b9;
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 1px;
+}
+.selected-run > span {
+  color: #8f9c85;
+}
+.selected-run > b {
+  font-weight: 400;
+  color: var(--volt);
+}
+.selected-run > svg {
+  width: 13px;
+  height: 13px;
+}
+.hero:has(.selected-run) .record-strip {
+  margin-top: 17px;
+}
+.run-setup-dialog {
+  width: min(940px, calc(100vw - 40px));
+  max-height: calc(100dvh - 40px);
+  padding: 36px;
+  overflow: auto;
+}
+.setup-close {
+  position: absolute;
+  right: 21px;
+  top: 20px;
+}
+.run-setup-dialog h2 {
+  font-size: clamp(29px, 4vw, 46px);
+  margin: 15px 0 12px;
+}
+.run-setup-dialog > p {
+  font-size: 11px;
+  line-height: 1.8;
+  color: #aebba1;
+  max-width: 620px;
+}
+.setup-field {
+  margin: 25px 0 0;
+  border: 0;
+  padding: 0;
+  min-width: 0;
+}
+.setup-field legend {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  margin-bottom: 13px;
+}
+.setup-field legend > span {
+  color: var(--volt);
+  margin-right: 12px;
+}
+.road-choices,
+.difficulty-choices {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.road-choice,
+.difficulty-choice {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 17px;
+  border: 1px solid #c8d6b52e;
+  border-radius: 2px;
+  background: #15221b;
+  cursor: pointer;
+  transition:
+    border-color 0.16s,
+    background 0.16s;
+}
+.road-choice:hover,
+.difficulty-choice:hover {
+  border-color: #c8d6b58a;
+}
+.road-choice:has(input:checked),
+.difficulty-choice:has(input:checked) {
+  border-color: var(--volt);
+  background: #222e20;
+}
+.road-choice:has(input:focus-visible),
+.difficulty-choice:has(input:focus-visible) {
+  outline: 2px solid #fff;
+  outline-offset: 4px;
+}
+.road-choice input,
+.difficulty-choice input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.choice-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.choice-title > b {
+  font-family: var(--mono);
+  font-size: 7px;
+  letter-spacing: 0.6px;
+  font-weight: 400;
+  color: #a8b797;
+}
+.choice-description {
+  color: #a7b49d;
+  font-size: 10px;
+  line-height: 1.65;
+}
+.choice-check {
+  position: absolute;
+  color: var(--volt);
+  right: 11px;
+  top: 11px;
+  font-size: 12px;
+  opacity: 0;
+}
+input:checked ~ .choice-check {
+  opacity: 1;
+}
+.road-preview {
+  display: flex;
+  justify-content: center;
+  height: 62px;
+  margin: -1px 12px 3px;
+  color: #d9e4d0;
+}
+.road-preview i {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 25px;
+  background: #3b443e;
+  border-right: 1px dashed #d3dbca57;
+  font-size: 25px;
+  font-style: normal;
+}
+.road-preview i:first-child {
+  border-left: 1px solid #e0b04a;
+}
+.road-preview i:last-child {
+  border-right: 1px solid #e0b04a;
+}
+.road-preview i.oncoming {
+  color: #edbb74;
+}
+.road-preview i.oncoming:has(+ i:not(.oncoming)) {
+  border-right: 3px double #e0b04a;
+}
+.difficulty-stats {
+  color: #bdcda9;
+  font-family: var(--mono);
+  font-size: 7px;
+  letter-spacing: 0.5px;
+  line-height: 1.7;
+}
+.difficulty-choice {
+  padding-top: 21px;
+}
+.difficulty-choice .choice-title {
+  padding-right: 7px;
+}
+.setup-summary {
+  margin-top: 24px;
+  padding: 18px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.setup-summary strong {
+  display: block;
+  margin-top: 7px;
+  font-size: 20px;
+  font-weight: 400;
+  font-family: var(--mono);
+}
+.setup-summary p {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 7px;
+  color: #91a182;
+  letter-spacing: 1px;
+  font-family: var(--mono);
+}
+.setup-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 23px;
+}
+.setup-actions .primary-button {
+  height: 49px;
+  width: 235px;
+}
+.setup-actions .text-button {
+  font-size: 8px;
+}
+.run-dialog > .run-profile-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--volt);
+  letter-spacing: 1.4px;
+}
+@media (min-width: 651px) and (max-height: 800px) {
+  .run-setup-dialog {
+    padding: 24px 30px;
+  }
+  .run-setup-dialog h2 {
+    margin: 11px 0 9px;
+    font-size: 35px;
+  }
+  .run-setup-dialog > p {
+    margin: 8px 0;
+  }
+  .setup-field {
+    margin-top: 18px;
+  }
+  .road-choice,
+  .difficulty-choice {
+    padding: 13px;
+    gap: 8px;
+  }
+  .road-preview {
+    height: 44px;
+  }
+  .choice-description {
+    font-size: 9px;
+  }
+  .setup-summary {
+    margin-top: 18px;
+    padding: 13px 0;
+    gap: 10px;
+  }
+  .setup-summary strong {
+    font-size: 17px;
+  }
+  .setup-actions {
+    margin-top: 16px;
+  }
+}
+@media (max-width: 650px) {
+  .run-setup-dialog {
+    width: calc(100vw - 24px);
+    max-height: calc(100dvh - 24px);
+    padding: 25px 18px 20px;
+  }
+  .run-setup-dialog .eyebrow {
+    font-size: 7px;
+    padding-right: 30px;
+  }
+  .run-setup-dialog h2 {
+    font-size: 31px;
+    letter-spacing: -1.4px;
+  }
+  .run-setup-dialog > p {
+    font-size: 10px;
+  }
+  .setup-field {
+    margin-top: 21px;
+  }
+  .road-choices,
+  .difficulty-choices {
+    grid-template-columns: 1fr;
+    gap: 9px;
+  }
+  .road-choice {
+    display: grid;
+    grid-template-columns: 82px 1fr;
+    column-gap: 14px;
+    row-gap: 5px;
+    padding: 12px;
+  }
+  .road-preview {
+    grid-row: span 2;
+    height: 53px;
+    margin: 0;
+  }
+  .road-preview i {
+    width: 17px;
+    font-size: 22px;
+  }
+  .road-choice .choice-title {
+    padding-right: 14px;
+    font-size: 13px;
+  }
+  .road-choice .choice-description {
+    font-size: 9px;
+  }
+  .difficulty-choice {
+    gap: 7px;
+    padding: 13px 24px 13px 13px;
+  }
+  .difficulty-choice .choice-title {
+    font-size: 13px;
+  }
+  .difficulty-choice .choice-description {
+    font-size: 9px;
+  }
+  .setup-summary {
+    grid-template-columns: 1fr;
+    gap: 13px;
+  }
+  .setup-summary strong {
+    font-size: 18px;
+  }
+  .setup-summary p {
+    line-height: 1.7;
+  }
+  .setup-actions {
+    flex-direction: column-reverse;
+    gap: 12px;
+  }
+  .setup-actions .primary-button {
+    width: 100%;
+  }
+  .setup-actions .text-button {
+    min-height: 34px;
+  }
+  .selected-run {
+    font-size: 7px;
+    margin-top: 8px;
+    gap: 8px;
+  }
+}
