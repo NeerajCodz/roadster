@@ -1,6 +1,15 @@
-import { GANTRY_LAYOUT, PLAYER_BODY } from './road-layout';
+import { gantryFor, PLAYER_BODY } from './road-layout';
 import { BARRICADE_BODY } from './barricade-layout';
 import { TRAFFIC_CATALOG, TRAFFIC_PAINTS, trafficBounds, trafficSpec } from './traffic-catalog';
+import {
+  DEFAULT_RUN_OPTIONS,
+  LANE_WIDTH,
+  directionForLane,
+  difficultyFor,
+  roadFor,
+  sanitizeRunOptions,
+  type RunOptions,
+} from './run-settings';
 
 export type GameStatus = 'menu' | 'playing' | 'paused' | 'crashed';
 export type PickupKind = 'bolt' | 'air' | 'shield' | 'magnet' | 'double' | 'rocket';
@@ -19,12 +28,14 @@ export interface Entity {
   braking?: boolean;
   appearance?: number;
   speed?: number;
+  direction?: 1 | -1;
 }
 export interface GameEvent {
   type: string;
   label?: string;
 }
 export interface GameState {
+  readonly options: RunOptions;
   status: GameStatus;
   time: number;
   distance: number;
@@ -70,15 +81,16 @@ export const EMPTY_CONTROLS: Controls = Object.freeze({
   rollRight: false,
 });
 
-const freshState = (status: GameStatus): GameState => ({
+const freshState = (status: GameStatus, options: RunOptions = DEFAULT_RUN_OPTIONS): GameState => ({
+  options,
   status,
   time: 0,
   distance: 0,
   score: 0,
   bolts: 0,
-  speed: 44,
-  lane: 0,
-  x: 0,
+  speed: difficultyFor(options.difficulty).cruiseSpeed,
+  lane: roadFor(options.mode).startLane,
+  x: roadFor(options.mode).startLane * LANE_WIDTH,
   y: 0,
   vy: 0,
   air: 100,
@@ -98,7 +110,6 @@ const freshState = (status: GameStatus): GameState => ({
   nearMisses: 0,
 });
 
-const LANE_WIDTH = 3.6;
 const ROLL_DURATION = 0.65;
 // A full roll needs enough tyre clearance for the body to rotate above the surface.
 const ROLL_CLEARANCE = Math.hypot(PLAYER_BODY.width / 2, PLAYER_BODY.height);
@@ -138,13 +149,33 @@ export class Simulation {
   private resolvedGantry = -1;
   private nextAmbientDistance = 110;
 
-  constructor(seed = 1729) {
+  constructor(seed = 1729, options: Partial<RunOptions> = DEFAULT_RUN_OPTIONS) {
     this.seed = seed >>> 0;
     this.randomState = this.seed;
+    this.state = freshState('menu', sanitizeRunOptions(options));
   }
 
-  start(): void {
-    this.state = freshState('playing');
+  private get road() {
+    return roadFor(this.state.options.mode);
+  }
+  private get rules() {
+    return difficultyFor(this.state.options.difficulty);
+  }
+  private laneBit(lane: number) {
+    return 1 << this.road.lanes.indexOf(lane);
+  }
+  private get maxBlockedLanes() {
+    return this.road.lanes.length - (this.road.lanes.length >= 4 ? 2 : 1);
+  }
+
+  configure(options: unknown): boolean {
+    if (this.state.status !== 'menu') return false;
+    this.state = freshState('menu', sanitizeRunOptions(options));
+    return true;
+  }
+
+  start(options?: Partial<RunOptions>): void {
+    this.state = freshState('playing', sanitizeRunOptions({ ...this.state.options, ...options }));
     this.randomState = this.seed;
     this.nextId = 1;
     this.nextWaveDistance = 130;
@@ -159,11 +190,16 @@ export class Simulation {
     this.flightExhausted = false;
     this.roofId = null;
     this.riddenRoofs.clear();
-    for (let i = 0; i < 5; i++) this.add('pickup', 0, -38 - i * 13, 1.15, 'bolt');
+    const start = this.road.startLane;
+    for (let i = 0; i < 5; i++) this.add('pickup', start, -38 - i * 13, 1.15, 'bolt');
     // A clear centre lane gives a new player time to read the road.
-    this.add('traffic', -1, -160);
-    this.add('traffic', 1, -190);
-    this.add('ramp', 0, -245);
+    const opening =
+      this.state.options.mode === 'normal'
+        ? [-1, 1]
+        : this.road.lanes.filter((lane) => lane !== start);
+    this.add('traffic', opening[0], -160);
+    this.add('traffic', opening[opening.length - 1], -190);
+    this.add('ramp', start, -245);
     this.state.events.push({ type: 'start' });
   }
 
@@ -179,7 +215,7 @@ export class Simulation {
   }
 
   menu(): void {
-    this.state = freshState('menu');
+    this.state = freshState('menu', this.state.options);
     this.previous = { ...EMPTY_CONTROLS };
     this.flightExhausted = false;
     this.roofId = null;
@@ -206,7 +242,11 @@ export class Simulation {
     const left = controls.left && !this.previous.left;
     const right = controls.right && !this.previous.right;
     if (controls.left !== controls.right && (left || right)) {
-      const lane = clamp(s.lane + (right ? 1 : -1), -2, 2);
+      const lane = clamp(
+        s.lane + (right ? 1 : -1),
+        this.road.lanes[0],
+        this.road.lanes[this.road.lanes.length - 1],
+      );
       if (lane !== s.lane) s.events.push({ type: 'lane' });
       s.lane = lane;
     }
@@ -222,7 +262,11 @@ export class Simulation {
       s.rollCooldown = 1.7;
       s.invincible = Math.max(s.invincible, 0.72);
       s.air -= 8;
-      s.lane = clamp(s.lane + s.rollDirection, -2, 2);
+      s.lane = clamp(
+        s.lane + s.rollDirection,
+        this.road.lanes[0],
+        this.road.lanes[this.road.lanes.length - 1],
+      );
       this.trick('roll', 'BARREL ROLL', 100);
     }
     if (!controls.fly) this.flightExhausted = false;
@@ -253,19 +297,29 @@ export class Simulation {
     }
     if (s.comboTimer === 0) s.combo = 1;
     s.time += dt;
-    const cruise = 44 + Math.min(10, s.distance / 2200);
+    const cruise = this.rules.cruiseSpeed + Math.min(this.rules.speedRamp, s.distance / 2200);
     s.boosting = controls.accelerate || s.rocket > 0;
-    const targetSpeed = s.rocket > 0 ? 86 : controls.accelerate ? cruise + 22 : cruise;
+    const targetSpeed =
+      s.rocket > 0
+        ? this.rules.rocketSpeed
+        : controls.accelerate
+          ? cruise + this.rules.boostSpeed
+          : cruise;
     s.speed = approach(s.speed, targetSpeed, 1.9, dt);
     const travel = s.speed * dt;
     const previousDistance = s.distance;
     s.distance += travel;
     while (s.distance >= this.nextMilestone) {
-      s.score += 250 * (this.nextMilestone / 1000) * s.combo * (s.double > 0 ? 2 : 1);
+      s.score +=
+        250 *
+        (this.nextMilestone / 1000) *
+        s.combo *
+        (s.double > 0 ? 2 : 1) *
+        this.rules.scoreMultiplier;
       s.events.push({ type: 'milestone', label: `${this.nextMilestone / 1000} KM MILESTONE` });
       this.nextMilestone += 1000;
     }
-    s.score += travel * 0.6 * s.combo * (s.double > 0 ? 2 : 1);
+    s.score += travel * 0.6 * s.combo * (s.double > 0 ? 2 : 1) * this.rules.scoreMultiplier;
     const previousX = s.x;
     s.x = approach(s.x, s.lane * LANE_WIDTH, 11, dt);
     const previousY = s.y;
@@ -362,7 +416,7 @@ export class Simulation {
           s.nearMisses++;
           s.combo = Math.min(10, s.combo + 1);
           s.comboTimer = 4.5;
-          s.score += 100 * s.combo * (s.double > 0 ? 2 : 1);
+          s.score += 100 * s.combo * (s.double > 0 ? 2 : 1) * this.rules.scoreMultiplier;
           s.events.push({ type: 'near-miss', label: `NEAR MISS ×${s.combo}` });
         }
       }
@@ -383,11 +437,15 @@ export class Simulation {
     }
     if (s.status === 'playing' && s.distance >= this.nextWaveDistance) {
       this.spawnWave();
-      this.nextWaveDistance += Math.max(68, 120 - s.distance / 100);
+      this.nextWaveDistance += Math.max(
+        this.rules.waveMinGap,
+        this.rules.waveGap - s.distance / 100,
+      );
     }
     if (s.status === 'playing' && s.time > 2 && s.distance >= this.nextAmbientDistance) {
       this.spawnAmbientTraffic();
-      this.nextAmbientDistance = s.distance + (s.distance < 800 ? 16 : 12);
+      this.nextAmbientDistance =
+        s.distance + this.rules.ambientGap * (s.distance < 800 ? 4 / 3 : 1);
     }
   }
 
@@ -395,13 +453,13 @@ export class Simulation {
     const s = this.state;
     s.combo = Math.min(10, s.combo + 1);
     s.comboTimer = 4.5;
-    s.score += points * s.combo * (s.double > 0 ? 2 : 1);
+    s.score += points * s.combo * (s.double > 0 ? 2 : 1) * this.rules.scoreMultiplier;
     s.events.push({ type, label });
   }
 
   private collideGantries(distance: number, x: number, y: number): void {
     const s = this.state;
-    const layout = GANTRY_LAYOUT;
+    const layout = gantryFor(s.options.mode);
     const halfLength = PLAYER_BODY.length / 2;
     const firstCycle = Math.max(
       0,
@@ -481,7 +539,8 @@ export class Simulation {
       };
       this.motions.set(entity.id, motion);
     }
-    const baseSpeed = trafficSpec(entity.variant).cruiseSpeed;
+    const baseSpeed = trafficSpec(entity.variant).cruiseSpeed * this.rules.trafficSpeed;
+    const direction = entity.direction ?? 1;
     if (s.time >= motion.brakeAt) {
       if (entity.z < -110) motion.brakeUntil = s.time + 1.2;
       motion.brakeAt = Infinity;
@@ -489,9 +548,9 @@ export class Simulation {
     let targetSpeed = baseSpeed * (s.time < motion.brakeUntil ? 0.65 : 1);
     let safeSpeed = Infinity;
     const ownLength = trafficBounds(entity.variant).length;
-    let packLanes = 1 << (entity.lane + 2);
+    let packLanes = this.laneBit(entity.lane);
     for (const other of s.entities) {
-      const gap = entity.z - other.z;
+      const gap = (entity.z - other.z) * direction;
       if (
         other.id === entity.id ||
         (other.kind !== 'traffic' && other.kind !== 'barrier') ||
@@ -499,22 +558,26 @@ export class Simulation {
       )
         continue;
       if (gap > 0 && gap < 55) {
-        packLanes |= 1 << (other.lane + 2);
-        if (other.targetLane !== undefined) packLanes |= 1 << (other.targetLane + 2);
+        packLanes |= this.laneBit(other.lane);
+        if (other.targetLane !== undefined) packLanes |= this.laneBit(other.targetLane);
       }
       if (Math.abs(other.x - entity.x) > 1.9) continue;
+      if (other.kind === 'traffic' && (other.direction ?? 1) !== direction) continue;
       const otherLength =
         other.kind === 'traffic' ? trafficBounds(other.variant).length : BARRICADE_BODY.depth;
-      const followingGap = (ownLength + otherLength) / 2 + 7;
+      const followingGap = (ownLength + otherLength) / 2 + this.rules.headway;
       if (gap <= 0 || gap > followingGap + 35) continue;
       const leaderSpeed =
-        other.kind === 'traffic' ? (other.speed ?? trafficSpec(other.variant).cruiseSpeed) : 0;
+        other.kind === 'traffic'
+          ? (other.speed ?? trafficSpec(other.variant).cruiseSpeed * this.rules.trafficSpeed)
+          : 0;
       targetSpeed = Math.min(targetSpeed, leaderSpeed + Math.max(0, gap - followingGap) * 0.6);
       safeSpeed = Math.min(safeSpeed, leaderSpeed + Math.max(0, gap - followingGap) / dt);
     }
     // Stagger a solid pack well ahead of the player, leaving a longitudinal escape
     // instead of directing a driver to make a sudden nearby lane change.
-    if (entity.z < -95 && packLanes === 31) targetSpeed = Math.min(targetSpeed, 6);
+    if (entity.z < -95 && packLanes === (1 << this.road.lanes.length) - 1)
+      targetSpeed = Math.min(targetSpeed, 6);
     const previousSpeed = motion.speed ?? baseSpeed;
     const actualSpeed = Math.max(
       0,
@@ -526,12 +589,12 @@ export class Simulation {
     motion.speed = actualSpeed;
     entity.speed = actualSpeed;
     entity.braking = actualSpeed < baseSpeed - 0.8;
-    const relative = Math.max(20, s.speed - baseSpeed * 0.65);
+    const relative = Math.max(20, s.speed - direction * baseSpeed * 0.65);
     if (entity.targetLane !== undefined) {
       if (motion.movingAt === null) {
-        if (s.time - motion.warningAt >= 1) {
+        if (s.time - motion.warningAt >= this.rules.signalSeconds) {
           // Reserve completion distance for an unexpected rocket picked up mid-maneuver.
-          const worstClosing = 86; // A driver may have stopped behind a ground barricade.
+          const worstClosing = this.rules.rocketSpeed + (direction < 0 ? baseSpeed : 0);
           if (
             entity.z < -75 &&
             entity.z < -(35 + worstClosing * LANE_CHANGE_TIME) &&
@@ -542,7 +605,7 @@ export class Simulation {
           else {
             entity.targetLane = undefined;
             entity.signal = 0;
-            motion.decisionAt = s.time + 1.8;
+            motion.decisionAt = s.time + this.rules.decisionSeconds;
           }
         }
       } else {
@@ -560,16 +623,22 @@ export class Simulation {
         }
       }
     } else if (s.time >= motion.decisionAt) {
-      motion.decisionAt = s.time + 1.8;
-      const lead = Math.max(75 + relative, 35 + relative * (1 + LANE_CHANGE_TIME));
-      if (entity.z < -lead) {
-        const direction = this.random() < 0.5 ? -1 : 1;
-        for (const offset of [direction, -direction]) {
+      motion.decisionAt = s.time + this.rules.decisionSeconds;
+      const lead = Math.max(
+        75 + relative,
+        35 + relative * (this.rules.signalSeconds + LANE_CHANGE_TIME),
+      );
+      if (
+        entity.z < -lead &&
+        (this.rules.maneuverChance === 1 || this.random() < this.rules.maneuverChance)
+      ) {
+        const turnDirection = this.random() < 0.5 ? -1 : 1;
+        for (const offset of [turnDirection, -turnDirection]) {
           const lane = entity.lane + offset;
           if (
-            lane < -2 ||
-            lane > 2 ||
-            !this.destinationClear(entity, lane, 1 + LANE_CHANGE_TIME) ||
+            !this.road.lanes.includes(lane) ||
+            directionForLane(s.options.mode, lane) !== direction ||
+            !this.destinationClear(entity, lane, this.rules.signalSeconds + LANE_CHANGE_TIME) ||
             !this.leavesEscapeLane(entity, lane)
           )
             continue;
@@ -582,11 +651,13 @@ export class Simulation {
         }
       }
     }
-    return actualSpeed;
+    return actualSpeed * direction;
   }
 
   private destinationClear(entity: Entity, lane: number, horizon: number): boolean {
-    const ownSpeed = entity.speed ?? trafficSpec(entity.variant).cruiseSpeed;
+    const ownSpeed =
+      (entity.speed ?? trafficSpec(entity.variant).cruiseSpeed * this.rules.trafficSpeed) *
+      (entity.direction ?? 1);
     return !this.state.entities.some((other) => {
       if (other.id === entity.id || Math.abs(other.y - entity.y) > 3.5) return false;
       const occupiesLane =
@@ -597,13 +668,16 @@ export class Simulation {
       const gap = entity.z - other.z;
       if (other.kind === 'pickup' || other.kind === 'ramp') return Math.abs(gap) < 32;
       const otherSpeed =
-        other.kind === 'traffic' ? (other.speed ?? trafficSpec(other.variant).cruiseSpeed) : 0;
+        other.kind === 'traffic'
+          ? (other.speed ?? trafficSpec(other.variant).cruiseSpeed * this.rules.trafficSpeed) *
+            (other.direction ?? 1)
+          : 0;
       const futureGap = gap + (otherSpeed - ownSpeed) * horizon;
       const bodyGap =
         (trafficBounds(entity.variant).length +
           (other.kind === 'traffic' ? trafficBounds(other.variant).length : BARRICADE_BODY.depth)) /
           2 +
-        12;
+        this.rules.spawnClearance;
       return (
         gap * futureGap <= 0 || Math.min(Math.abs(gap), Math.abs(futureGap)) < Math.max(24, bodyGap)
       );
@@ -622,10 +696,10 @@ export class Simulation {
         continue;
       occupied.add(other.lane);
       if (other.targetLane !== undefined) occupied.add(other.targetLane);
-      for (let lane = -2; lane <= 2; lane++)
+      for (const lane of this.road.lanes)
         if (Math.abs(other.x - lane * LANE_WIDTH) < 2) occupied.add(lane);
     }
-    return occupied.size < 4;
+    return occupied.size <= this.maxBlockedLanes;
   }
 
   private roofFloor(): number {
@@ -662,7 +736,7 @@ export class Simulation {
       }
       if (!this.flightExhausted) {
         s.vy = approach(s.vy, 5.4, 3.2, dt);
-        s.air = Math.max(0, s.air - 20 * dt);
+        s.air = Math.max(0, s.air - this.rules.flightDrain * dt);
         if (s.air === 0) this.flightExhausted = true;
       }
     } else {
@@ -673,7 +747,7 @@ export class Simulation {
     if (s.y === floor) {
       s.vy = 0;
       s.roll = 0;
-      s.air = Math.min(100, s.air + 28 * dt);
+      s.air = Math.min(100, s.air + this.rules.groundRecharge * dt);
     }
   }
 
@@ -681,7 +755,7 @@ export class Simulation {
     const s = this.state;
     const labels: Record<PickupKind, string> = {
       bolt: '+1 BOLT',
-      air: 'AIR +35',
+      air: `AIR +${this.rules.airPickup}`,
       shield: 'SHIELD ACTIVE',
       magnet: 'MAGNET ACTIVE',
       double: 'DOUBLE SCORE',
@@ -690,10 +764,10 @@ export class Simulation {
     switch (kind) {
       case 'bolt':
         s.bolts++;
-        s.score += 25 * s.combo * (s.double > 0 ? 2 : 1);
+        s.score += 25 * s.combo * (s.double > 0 ? 2 : 1) * this.rules.scoreMultiplier;
         break;
       case 'air':
-        s.air = Math.min(100, s.air + 35);
+        s.air = Math.min(100, s.air + this.rules.airPickup);
         break;
       case 'shield':
         s.shield = 15;
@@ -717,16 +791,22 @@ export class Simulation {
   private spawnWave(): void {
     const s = this.state;
     this.wave++;
-    const lanes = [-2, -1, 0, 1, 2];
+    const lanes = [...this.road.lanes];
     // Never block the whole road: every wave retains at least two open lanes.
     for (let i = lanes.length - 1; i > 0; i--) {
       const j = Math.floor(this.random() * (i + 1));
       [lanes[i], lanes[j]] = [lanes[j], lanes[i]];
     }
-    const count = 1 + Math.min(2, Math.floor(s.distance / 950));
-    const aerial = s.distance > 950 && this.wave % 3 === 0;
+    const count = Math.min(
+      lanes.length - 1,
+      1 + Math.min(2, Math.floor(s.distance / this.rules.waveStage)),
+    );
+    const aerial = s.distance > this.rules.aerialAfter && this.wave % this.rules.aerialEvery === 0;
     for (let i = 0; i < count; i++) {
-      const sky = aerial ? i < 2 : s.distance > 650 && this.random() < 0.2;
+      const sky = aerial
+        ? i < 2
+        : s.distance > this.rules.aerialAfter * (650 / 950) &&
+          this.random() < this.rules.aerialChance;
       const y =
         aerial && sky
           ? this.wave % 6 === 0
@@ -739,28 +819,46 @@ export class Simulation {
       this.add(
         kind,
         lanes[i],
-        aerial ? -235 - i * (this.wave % 6 === 0 ? 12 : 32) : -240 - this.random() * 38,
+        aerial
+          ? -this.rules.spawnAhead + 5 - i * (this.wave % 6 === 0 ? 12 : 32)
+          : -this.rules.spawnAhead - this.random() * 38,
         y,
       );
     }
     // A hanging obstruction challenges flight while preserving the wave's open lanes.
-    if (s.distance > 700 && this.wave % 5 === 0) this.add('barrier', lanes[0], -258, 8);
+    if (s.distance > this.rules.aerialAfter * (700 / 950) && this.wave % 5 === 0)
+      this.add('barrier', lanes[0], -this.rules.spawnAhead - 18, 8);
     const rewardLane = lanes[count];
-    if (aerial || this.wave % 4 === 0) this.add('ramp', rewardLane, aerial ? -187 : -218);
+    if (aerial || this.wave % this.rules.rampEvery === 0)
+      this.add(
+        'ramp',
+        rewardLane,
+        aerial ? -this.rules.spawnAhead + 53 : -this.rules.spawnAhead + 22,
+      );
     const kinds: PickupKind[] = ['air', 'shield', 'magnet', 'double', 'rocket'];
-    const reward = this.wave % 3 === 0 ? kinds[Math.floor(this.random() * kinds.length)] : 'bolt';
-    this.add('pickup', rewardLane, aerial ? -235 : -222, aerial ? 5.5 : 1.15, reward);
+    const reward =
+      this.wave % this.rules.bonusEvery === 0
+        ? kinds[Math.floor(this.random() * kinds.length)]
+        : 'bolt';
+    this.add(
+      'pickup',
+      rewardLane,
+      aerial ? -this.rules.spawnAhead + 5 : -this.rules.spawnAhead + 18,
+      aerial ? 5.5 : 1.15,
+      reward,
+    );
     if (aerial) {
       for (let i = 0; i <= 8; i++)
         this.add(
           'pickup',
           rewardLane,
-          -175 - i * 20,
+          -this.rules.spawnAhead + 65 - i * 20,
           1.15 + Math.sin((i / 8) * Math.PI) * 6.2,
           'bolt',
         );
     } else {
-      for (let i = 0; i < 3; i++) this.add('pickup', rewardLane, -238 - i * 12, 1.15, 'bolt');
+      for (let i = 0; i < 3; i++)
+        this.add('pickup', rewardLane, -this.rules.spawnAhead + 2 - i * 12, 1.15, 'bolt');
     }
   }
 
@@ -796,7 +894,7 @@ export class Simulation {
         gap <
           (other.kind === 'pickup' || other.kind === 'ramp'
             ? 34
-            : Math.max(24, (length + otherLength) / 2 + 12))
+            : Math.max(24, (length + otherLength) / 2 + this.rules.spawnClearance))
       )
         return false;
       if (
@@ -805,17 +903,20 @@ export class Simulation {
       ) {
         occupied.add(other.lane);
         if (other.targetLane !== undefined) occupied.add(other.targetLane);
-        for (let candidate = -2; candidate <= 2; candidate++)
+        for (const candidate of this.road.lanes)
           if (Math.abs(other.x - candidate * LANE_WIDTH) < 2) occupied.add(candidate);
       }
     }
-    return occupied.size < 4;
+    return occupied.size <= this.maxBlockedLanes;
   }
 
   private spawnAmbientTraffic(): void {
     const s = this.state;
     const cars = s.entities.filter((entity) => entity.kind === 'traffic');
-    const target = Math.min(42, 10 + Math.floor(s.distance / 50));
+    const target = Math.min(
+      Math.floor(this.rules.trafficPerLane * this.road.lanes.length),
+      10 + Math.floor(s.distance / 50),
+    );
     if (cars.length >= target || s.entities.length >= 190) return;
     const count = this.random() < 0.35 ? 2 : 1;
     for (
@@ -824,11 +925,11 @@ export class Simulation {
       n++
     ) {
       const variant = this.chooseTrafficVariant();
-      const firstLane = Math.floor(this.random() * 5) - 2;
+      const firstLane = Math.floor(this.random() * this.road.lanes.length);
       let placed = false;
       for (let attempt = 0; attempt < 15 && !placed; attempt++) {
-        const lane = ((firstLane + 2 + attempt) % 5) - 2;
-        const z = -300 - this.random() * 170;
+        const lane = this.road.lanes[(firstLane + attempt) % this.road.lanes.length];
+        const z = -this.rules.spawnAhead - 60 - this.random() * 170;
         if (this.canPlaceRoadObstacle(lane, z, trafficBounds(variant).length)) {
           this.add('traffic', lane, z, 0, undefined, variant);
           placed = true;
@@ -852,7 +953,8 @@ export class Simulation {
         : Math.floor(this.random() * TRAFFIC_CATALOG.length));
     if (
       kind === 'traffic' &&
-      this.state.entities.filter((entity) => entity.kind === 'traffic').length >= 60
+      this.state.entities.filter((entity) => entity.kind === 'traffic').length >=
+        this.rules.trafficCap
     )
       return;
     if (
@@ -873,11 +975,14 @@ export class Simulation {
       z,
       variant,
     };
-    if (kind === 'traffic')
+    if (kind === 'traffic') {
+      entity.direction = directionForLane(this.state.options.mode, lane);
+      entity.speed = trafficSpec(variant).cruiseSpeed * this.rules.trafficSpeed;
       entity.appearance =
         trafficSpec(variant).livery === 'none'
           ? Math.floor(this.random() * TRAFFIC_PAINTS.length)
           : 0;
+    }
     if (pickup) entity.pickup = pickup;
     this.state.entities.push(entity);
   }

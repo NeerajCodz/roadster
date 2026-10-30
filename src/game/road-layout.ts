@@ -1,3 +1,5 @@
+import { LANE_WIDTH, roadFor, type RoadModeId } from './run-settings';
+
 /** Repeated scenery and its physical bounds must share this layout. */
 export const GANTRY_LAYOUT = {
   repeatLength: 1000,
@@ -10,3 +12,13 @@ export const GANTRY_LAYOUT = {
 } as const;
 
 export const PLAYER_BODY = { width: 2.23, height: 1.12, length: 4.3 } as const;
+
+/** Preserve the outside-lane flight gaps as the carriageway gets narrower. */
+export function gantryFor(mode: RoadModeId) {
+  const lanes = roadFor(mode).lanes.length;
+  return {
+    ...GANTRY_LAYOUT,
+    panel: { ...GANTRY_LAYOUT.panel, width: lanes * LANE_WIDTH - 6 },
+    beam: { ...GANTRY_LAYOUT.beam, width: lanes * LANE_WIDTH + 6 },
+  };
+}
