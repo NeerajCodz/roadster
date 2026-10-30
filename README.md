@@ -35,7 +35,7 @@ Use `npm ci` instead of `npm install` for a reproducible install from the lockfi
 
 ## Play
 
-The car cruises automatically. Keep a clear lane or fly over obstacles; releasing flight lets the car descend. Air refills on the ground. Barrel rolls work only while airborne: take off first, then press Q / E. They consume air, move one lane, and provide brief collision protection. Landing on the road or a traffic roof immediately ends the spin. Ramps launch the car, and a controlled landing can ride a traffic vehicle's roof. Near misses increase a temporary combo multiplier. Watch for traffic in the air as the run progresses.
+The car cruises automatically. Keep a clear lane or fly over obstacles; releasing flight lets the car descend. Air refills on the ground. Barrel rolls work only while airborne: take off first, then press Q / E. They consume air, move one lane, and provide brief collision protection. Landing on the road or a traffic roof immediately ends the spin. Ramps launch the car, and a controlled landing can ride a traffic vehicle's roof. Near misses increase a temporary combo multiplier. NPC cars stay on the road; watch for flying barricades as the run progresses.
 
 | Action         | Desktop                                 | Touch                 |
 | -------------- | --------------------------------------- | --------------------- |
@@ -52,7 +52,11 @@ Touch supports simultaneous steering and flight inputs. The game pauses when the
 
 You can also use the scene itself on touch screens: swipe horizontally to steer, hold to fly, swipe down to dive, and double-tap while airborne to roll in your last steering direction. Input cancellation and queued swipe limits prevent stuck controls. The roll readiness meter shows its cooldown and low-energy state.
 
-Traffic signals before changing lanes, brakes when following a slower vehicle, and forms aerial pairs and slaloms as difficulty increases. Rolls, near misses, roof rides, and big air build trick chains; each kilometre adds a milestone bonus. Power-ups have readable labels, active timers, and matching audio feedback.
+Traffic signals before changing lanes and brakes when following a slower vehicle. Flying barricades form aerial pairs and slaloms as difficulty increases. Rolls, near misses, roof rides, and big air build trick chains; each kilometre adds a milestone bonus. Power-ups have readable labels, active timers, and matching audio feedback.
+
+Barricades have two yellow-and-black striped rails, dark posts, fixings and weighted rubber feet. Flying versions add exactly two downward boosters with animated exhaust. Both use shared 3 × 1.7 × 0.85 m collision bounds; the exhaust is cosmetic. NPC cars never spawn in the air.
+
+To inspect both props side by side, start the development server and open [`/tools/barricades/index.html`](http://127.0.0.1:5173/tools/barricades/index.html). The barricade geometry and procedural paint textures are defined in `src/game/barricade.ts`.
 
 ## Garage, settings, and records
 

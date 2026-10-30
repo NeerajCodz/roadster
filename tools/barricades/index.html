@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Roaster Sim — Barricade inspection</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #131817;
+        color: #e7eddf;
+        font:
+          13px system-ui,
+          sans-serif;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      header {
+        position: absolute;
+        top: 32px;
+        left: 40px;
+        right: 40px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid #ffffff24;
+        padding-bottom: 19px;
+      }
+      header strong {
+        letter-spacing: 4px;
+        font-size: 13px;
+      }
+      header span {
+        color: #bdcfac;
+        letter-spacing: 2px;
+        font-size: 9px;
+      }
+      footer {
+        position: absolute;
+        bottom: 28px;
+        left: 7%;
+        right: 7%;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8%;
+      }
+      footer section {
+        border-top: 1px solid #ffffff30;
+        padding-top: 14px;
+      }
+      h1 {
+        margin: 8px 0;
+        font-size: 22px;
+        font-weight: 500;
+        letter-spacing: 1px;
+      }
+      .label {
+        color: #dcf569;
+        font-size: 9px;
+        letter-spacing: 2px;
+      }
+      p {
+        margin: 0;
+        color: #aebca6;
+        font-size: 11px;
+        line-height: 1.8;
+      }
+      @media (max-width: 600px) {
+        header {
+          left: 20px;
+          right: 20px;
+        }
+        header span {
+          display: none;
+        }
+        h1 {
+          font-size: 15px;
+        }
+        p {
+          font-size: 9px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>ROASTER SIM</strong><span>BARRICADE / MATERIAL &amp; GEOMETRY INSPECTION</span>
+    </header>
+    <canvas aria-label="Ground and flying barricade model preview"></canvas>
+    <footer>
+      <section>
+        <span class="label">01 / GROUND</span>
+        <h1>ROAD BARRICADE</h1>
+        <p>Striped twin rails · steel fixings · weighted rubber feet</p>
+      </section>
+      <section>
+        <span class="label">02 / AIRBORNE</span>
+        <h1>HOVER BARRICADE</h1>
+        <p>The same protective frame · two downward boosters</p>
+      </section>
+    </footer>
+    <script type="module" src="./viewer.ts"></script>
+  </body>
+</html>

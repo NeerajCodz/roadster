@@ -1,5 +1,14 @@
 # Roaster Sim verification
 
+## Barricades — 2026-10-30
+
+- 93 regression tests pass, including grounded NPC traffic across 12 seeded long runs, flying barricade heights/collisions, full frame bounds, exactly two downward boosters and independent pooled-clone animation.
+- TypeScript and Vite production build pass. All 29 original asset checks pass.
+- Ground and flying models inspected side by side in the browser; the two rails, striped paint, posts, feet and downward exhaust are visible.
+- Live game start, acceleration and pause checked with no browser console errors.
+- Instanced clone buffers are released on pool overflow and pooled groups are included during renderer teardown; shared geometry and materials remain valid.
+- The user's car models, paint shop and model-generation tools were preserved.
+
 Verified on 2026-10-25, Windows, Node 22.22.0.
 
 - `npm test`: 60 passing tests, including simulation, keyboard focus, touch gestures, collision-aligned presentation, vehicle wheel axes, traffic warnings, trick scoring and gantry collisions.
