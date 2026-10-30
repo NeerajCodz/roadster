@@ -7,8 +7,13 @@ export const ROAD_LENGTH = 800;
 export const ROAD_MARKING_PERIOD = 48;
 const ROAD_CENTER_Z = -340;
 
-export function roadMetrics(mode: RoadModeId) {
-  const half = (roadFor(mode).lanes.length * LANE_WIDTH) / 2;
+export function roadProfileKey(mode: RoadModeId, laneCount?: number) {
+  const road = roadFor(mode, laneCount);
+  return `${road.id}:${road.lanes.length}`;
+}
+
+export function roadMetrics(mode: RoadModeId, laneCount?: number) {
+  const half = (roadFor(mode, laneCount).lanes.length * LANE_WIDTH) / 2;
   return {
     travelHalfWidth: half,
     deckWidth: half * 2 + 4.5,
@@ -36,12 +41,17 @@ function instances(
 }
 
 /** DOM-free road factory used by the renderer and geometry regression tests. */
-export function createRoadGeometry(mode: RoadModeId, asphalt?: THREE.Texture): THREE.Group {
+export function createRoadGeometry(
+  mode: RoadModeId,
+  asphalt?: THREE.Texture,
+  laneCount?: number,
+): THREE.Group {
   const group = new THREE.Group();
   group.name = `Road:${mode}`;
   group.userData.roadMode = mode;
-  const road = roadFor(mode),
-    metrics = roadMetrics(mode);
+  const road = roadFor(mode, laneCount),
+    metrics = roadMetrics(mode, laneCount);
+  group.userData.laneCount = road.lanes.length;
   const deck = new THREE.Mesh(
     new THREE.BoxGeometry(metrics.deckWidth, 0.6, ROAD_LENGTH),
     new THREE.MeshStandardMaterial({ color: '#747780', roughness: 0.97, map: asphalt ?? null }),
@@ -65,7 +75,13 @@ export function createRoadGeometry(mode: RoadModeId, asphalt?: THREE.Texture): T
   const dashes: THREE.Matrix4[] = [];
   for (let z = 60; z > -770; z -= 24)
     for (const x of separators) dashes.push(new THREE.Matrix4().makeTranslation(x, 0.016, z));
-  group.add(instances('LaneSeparators', new THREE.BoxGeometry(0.1, 0.02, 4), white, dashes));
+  if (dashes.length)
+    group.add(instances('LaneSeparators', new THREE.BoxGeometry(0.1, 0.02, 4), white, dashes));
+  else {
+    const empty = new THREE.Group();
+    empty.name = 'LaneSeparators';
+    group.add(empty);
+  }
   if (dividers.length) {
     const divider = new THREE.Group();
     divider.name = 'CenterDivider';
@@ -150,8 +166,9 @@ export function createRoadGeometry(mode: RoadModeId, asphalt?: THREE.Texture): T
 export function createGantryGeometry(
   mode: RoadModeId,
   panelMaterial?: THREE.Material,
+  laneCount?: number,
 ): THREE.Group {
-  const layout = gantryFor(mode),
+  const layout = gantryFor(mode, laneCount),
     group = new THREE.Group();
   const metal = new THREE.MeshStandardMaterial({
     color: '#8d9287',
@@ -181,6 +198,36 @@ export function createGantryGeometry(
   panel.position.y = layout.panel.y;
   group.add(panel);
   return group;
+}
+
+/** Follow laterally on narrow screens so wider roads cannot leave the player's car offscreen. */
+export function gameplayRoadCamera(
+  x: number,
+  altitude: number,
+  aspect: number,
+  boosting: boolean,
+  position = new THREE.Vector3(),
+  lookAt = new THREE.Vector3(),
+) {
+  const follow = 1 - THREE.MathUtils.smoothstep(aspect, 0.8, 1.6);
+  position.set(
+    x * THREE.MathUtils.lerp(0.38, 1, follow),
+    4.4 + altitude * 0.83,
+    10.5 + (boosting ? 1.4 : 0),
+  );
+  lookAt.set(x * THREE.MathUtils.lerp(0.52, 1, follow), 1.2 + altitude * 0.8, -15);
+  return { position, lookAt, fov: boosting ? 68 : 58 };
+}
+
+/** A phone's horizontal field of view cannot afford the desktop camera's lateral lag. */
+export function followGameplayCamera(
+  position: THREE.Vector3,
+  target: THREE.Vector3,
+  aspect: number,
+  blend: number,
+) {
+  position.lerp(target, blend);
+  if (aspect < 1) position.x = target.x;
 }
 
 /** World-X controls become local steering/signals when the vehicle faces the player. */

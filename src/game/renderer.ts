@@ -10,11 +10,14 @@ import type { Entity, GameState } from './simulation';
 import { spinWheels } from './vehicle';
 import { carById, FACTORY, FINISH_PARAMS, type CarLook } from './cars';
 import { GANTRY_LAYOUT } from './road-layout';
-import { LANE_WIDTH, type RoadModeId } from './run-settings';
+import { LANE_WIDTH, roadFor, type RoadModeId } from './run-settings';
 import {
   createRoadGeometry,
   createGantryGeometry,
   roadMetrics,
+  roadProfileKey,
+  gameplayRoadCamera,
+  followGameplayCamera,
   trafficRoadPose,
   ROAD_MARKING_PERIOD,
 } from './road-geometry';
@@ -50,10 +53,11 @@ export class GameRenderer {
   private output: OutputPass;
   private road = new THREE.Group();
   private scenery = new THREE.Group();
-  private roadMode: RoadModeId | null = null;
-  private roadModes = new Map<RoadModeId, { road: THREE.Group; scenery: THREE.Group }>();
+  private roadMode: string | null = null;
+  private roadModes = new Map<string, { road: THREE.Group; scenery: THREE.Group }>();
   private asphalt: THREE.Texture | null = null;
   private billboardTextures = new Map<number, THREE.Texture>();
+  private gantryTexture: THREE.Texture | null = null;
   private car = new THREE.Group();
   private sun: THREE.DirectionalLight;
   private sky: THREE.Mesh;
@@ -94,6 +98,7 @@ export class GameRenderer {
   private environmentTarget: THREE.WebGLRenderTarget | null = null;
   private environmentGenerator: THREE.PMREMGenerator | null = null;
   private targetCamera = new THREE.Vector3();
+  private targetAim = new THREE.Vector3();
   private entityIds = new Set<number>();
   private fogDay = new THREE.Color('#927b94');
   private fogNight = new THREE.Color('#302a54');
@@ -442,7 +447,7 @@ export class GameRenderer {
     this.elapsed += dt;
     const menu = state.status === 'menu';
     const moving = state.status === 'playing';
-    this.setRoadMode(state.options?.mode ?? 'normal');
+    this.setRoadMode(state.options?.mode ?? 'normal', state.options?.laneCount);
     const travel = menu ? this.elapsed * 2 : state.distance;
     const roadOffset = travel % ROAD_MARKING_PERIOD;
     this.road.position.z = roadOffset;
@@ -556,11 +561,15 @@ export class GameRenderer {
       this.camera.fov = 48;
     } else {
       const height = state.y;
-      const target = this.targetCamera.set(
-        state.x * 0.38,
-        4.4 + height * 0.83,
-        10.5 + (state.boosting ? 1.4 : 0),
+      const pose = gameplayRoadCamera(
+        state.x,
+        height,
+        this.camera.aspect,
+        state.boosting,
+        this.targetCamera,
+        this.targetAim,
       );
+      const target = pose.position;
       const pos = this.camera.position;
       const ease = 1 - Math.exp(-dt * (this.lastStatus === 'menu' ? 3.5 : 5));
       if (pos.z < 2) {
@@ -580,20 +589,16 @@ export class GameRenderer {
           THREE.MathUtils.lerp(pos.y, target.y, ease),
           Math.cos(next) * radius,
         );
-      } else pos.lerp(target, ease);
+      } else followGameplayCamera(pos, target, this.camera.aspect, ease);
       // Watch the car while the camera is still swinging round from in front of it, then hand
       // over to the usual look down the road once it is behind (pos.z is about 10.5 in play).
       const behind = THREE.MathUtils.smoothstep(pos.z, -2, 8);
       this.camera.lookAt(
-        THREE.MathUtils.lerp(state.x, state.x * 0.52, behind),
-        THREE.MathUtils.lerp(0.6 + height, 1.2 + height * 0.8, behind),
-        THREE.MathUtils.lerp(0, -15, behind),
+        THREE.MathUtils.lerp(state.x, pose.lookAt.x, behind),
+        THREE.MathUtils.lerp(0.6 + height, pose.lookAt.y, behind),
+        THREE.MathUtils.lerp(0, pose.lookAt.z, behind),
       );
-      this.camera.fov = THREE.MathUtils.lerp(
-        this.camera.fov,
-        state.boosting ? 68 : 58,
-        Math.min(1, dt * 3),
-      );
+      this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, pose.fov, Math.min(1, dt * 3));
     }
     this.camera.updateProjectionMatrix();
     this.syncEntities(menu ? [] : state.entities, dt, state.time);
@@ -604,26 +609,28 @@ export class GameRenderer {
     else this.renderer.render(this.scene, this.camera);
   }
 
-  private setRoadMode(mode: RoadModeId) {
-    if (mode === this.roadMode) return;
+  private setRoadMode(mode: RoadModeId, laneCount?: number) {
+    const count = roadFor(mode, laneCount).lanes.length;
+    const key = roadProfileKey(mode, count);
+    if (key === this.roadMode) return;
     this.scene.remove(this.road, this.scenery);
-    let cached = this.roadModes.get(mode);
+    let cached = this.roadModes.get(key);
     if (!cached) {
-      this.road = this.buildRoad(mode);
+      this.road = this.buildRoad(mode, count);
       this.scenery = new THREE.Group();
-      this.buildScenery(mode);
+      this.buildScenery(mode, count);
       cached = { road: this.road, scenery: this.scenery };
-      this.roadModes.set(mode, cached);
+      this.roadModes.set(key, cached);
       this.ownedRoots.add(cached.road);
       this.ownedRoots.add(cached.scenery);
     }
     this.road = cached.road;
     this.scenery = cached.scenery;
     this.scene.add(this.road, this.scenery);
-    this.roadMode = mode;
+    this.roadMode = key;
   }
 
-  private buildRoad(mode: RoadModeId) {
+  private buildRoad(mode: RoadModeId, laneCount: number) {
     if (!this.asphalt) {
       const canvas = document.createElement('canvas');
       canvas.width = canvas.height = 256;
@@ -646,7 +653,7 @@ export class GameRenderer {
       this.asphalt = texture;
       this.textures.add(texture);
     }
-    return createRoadGeometry(mode, this.asphalt);
+    return createRoadGeometry(mode, this.asphalt, laneCount);
   }
 
   private buildTerrain() {
@@ -666,8 +673,8 @@ export class GameRenderer {
     this.scene.add(ocean);
   }
 
-  private buildScenery(mode: RoadModeId) {
-    const metrics = roadMetrics(mode);
+  private buildScenery(mode: RoadModeId, laneCount: number) {
+    const metrics = roadMetrics(mode, laneCount);
     let seed = 1138;
     const rand = () => {
       seed = (seed * 16807) % 2147483647;
@@ -767,9 +774,10 @@ export class GameRenderer {
     }
     for (let i = 0; i < GANTRY_LAYOUT.count; i++)
       this.scenery.add(
-        this.makeSign(-GANTRY_LAYOUT.firstDistance - i * GANTRY_LAYOUT.spacing, mode),
+        this.makeSign(-GANTRY_LAYOUT.firstDistance - i * GANTRY_LAYOUT.spacing, mode, laneCount),
       );
-    for (let i = 0; i < 4; i++) this.scenery.add(this.makeBillboard(i, -150 - i * 220, mode));
+    for (let i = 0; i < 4; i++)
+      this.scenery.add(this.makeBillboard(i, -150 - i * 220, mode, laneCount));
     // Two identical kilometre segments let the nearest scenery wrap without popping.
     const nextSegment = this.scenery.clone(true);
     nextSegment.position.z = -SCENERY_LENGTH;
@@ -819,33 +827,38 @@ export class GameRenderer {
     geometry.computeVertexNormals();
     return geometry;
   }
-  private makeSign(z: number, mode: RoadModeId) {
-    const c = document.createElement('canvas');
-    c.width = 1024;
-    c.height = 256;
-    const ctx = c.getContext('2d')!;
-    ctx.fillStyle = '#284b40';
-    ctx.fillRect(0, 0, 1024, 256);
-    ctx.strokeStyle = '#c8d4bc';
-    ctx.lineWidth = 6;
-    ctx.strokeRect(10, 10, 1004, 236);
-    ctx.fillStyle = '#e8edda';
-    ctx.textAlign = 'center';
-    ctx.font = 'bold 52px sans-serif';
-    ctx.fillText('PACIFIC COAST   /   NORTH', 512, 95);
-    ctx.font = '42px sans-serif';
-    ctx.fillText('↓           OPEN ROAD           ↓', 512, 183);
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
+  private makeSign(z: number, mode: RoadModeId, laneCount: number) {
+    if (!this.gantryTexture) {
+      const c = document.createElement('canvas');
+      c.width = 1024;
+      c.height = 256;
+      const ctx = c.getContext('2d')!;
+      ctx.fillStyle = '#284b40';
+      ctx.fillRect(0, 0, 1024, 256);
+      ctx.strokeStyle = '#c8d4bc';
+      ctx.lineWidth = 6;
+      ctx.strokeRect(10, 10, 1004, 236);
+      ctx.fillStyle = '#e8edda';
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 52px sans-serif';
+      ctx.fillText('PACIFIC COAST   /   NORTH', 512, 95);
+      ctx.font = '42px sans-serif';
+      ctx.fillText('↓           OPEN ROAD           ↓', 512, 183);
+      const texture = new THREE.CanvasTexture(c);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      this.gantryTexture = texture;
+      this.textures.add(texture);
+    }
     const group = createGantryGeometry(
       mode,
-      new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8 }),
+      new THREE.MeshStandardMaterial({ map: this.gantryTexture, roughness: 0.8 }),
+      laneCount,
     );
     group.position.z = z;
     return group;
   }
 
-  private makeBillboard(index: number, z: number, mode: RoadModeId) {
+  private makeBillboard(index: number, z: number, mode: RoadModeId, laneCount: number) {
     const group = new THREE.Group();
     const metal = new THREE.MeshStandardMaterial({
       color: '#596261',
@@ -884,7 +897,7 @@ export class GameRenderer {
     panel.position.set(0, 13, 0.23);
     group.add(panel);
     const side = index % 2 ? -1 : 1;
-    group.position.set(side * roadMetrics(mode).billboardX, 0, z);
+    group.position.set(side * roadMetrics(mode, laneCount).billboardX, 0, z);
     group.rotation.y = -side * 0.25;
     return group;
   }
@@ -1270,6 +1283,7 @@ export class GameRenderer {
     this.trafficTemplates.clear();
     this.roadModes.clear();
     this.billboardTextures.clear();
+    this.gantryTexture = null;
     this.asphalt = null;
     this.ownedRoots.clear();
     this.textures.clear();
