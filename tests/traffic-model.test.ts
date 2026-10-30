@@ -116,3 +116,16 @@ test('service lettering sits outside the body with complete decal UVs', () => {
     assert.equal(Math.max(...values), 1);
   }
 });
+
+test('the fire engine ladder and beacons sit above their support bodies', () => {
+  const model = createTrafficVehicle(17);
+  model.updateMatrixWorld(true);
+  const ray = new THREE.Raycaster(new THREE.Vector3(0, 10, -1.51), new THREE.Vector3(0, -1, 0));
+  assert.equal(
+    ray.intersectObject(model, true)[0]?.object.name,
+    'Chrome',
+    'the ladder must be visible above the roof',
+  );
+  const beacon = model.getObjectByName('EmergencyLeft')!;
+  assert.ok(beacon.position.z < -1.85, 'the beacon must sit on the cab, ahead of the cargo body');
+});

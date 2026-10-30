@@ -351,8 +351,9 @@ function emergencyLights(
   b: Batch,
   m: Materials,
   roof: number,
+  z = 0,
 ) {
-  b.box(0.85, 0.045, 0.24, m.trim, 0, roof + 0.025, 0);
+  b.box(0.85, 0.045, 0.24, m.trim, 0, roof + 0.025, z);
   for (const [side, color] of [
     [-1, '#ec3b20'],
     [1, '#4a99e5'],
@@ -366,7 +367,7 @@ function emergencyLights(
     });
     const light = new THREE.Mesh(bevelBox(0.36, 0.1, 0.22, 0.025), mat);
     light.name = side < 0 ? 'EmergencyLeft' : 'EmergencyRight';
-    light.position.set(side * 0.23, s.height - 0.05, 0);
+    light.position.set(side * 0.23, roof + 0.1, z);
     root.add(light);
   }
 }
@@ -777,7 +778,18 @@ function commercial(root: THREE.Group, s: TrafficVehicleSpec, m: Materials, b: B
       for (const z of [center - cargoLength * 0.26, center + cargoLength * 0.26])
         loadCar(b, m, z, y, W * 0.65, carLength);
   } else if (s.livery === 'fire') {
-    b.box(W * 0.9, H - 1.15, cargoLength, m.paint, 0, (H + 1.15) / 2, center, euler(), 0.06);
+    const bodyRoof = H - 0.18;
+    b.box(
+      W * 0.9,
+      bodyRoof - 1.15,
+      cargoLength,
+      m.paint,
+      0,
+      (bodyRoof + 1.15) / 2,
+      center,
+      euler(),
+      0.06,
+    );
     for (const side of [-1, 1])
       for (let i = 0; i < 4; i++) {
         const z = cargoFront + 0.3 + (i * (cargoLength - 0.5)) / 4;
@@ -802,7 +814,7 @@ function commercial(root: THREE.Group, s: TrafficVehicleSpec, m: Materials, b: B
         H - 0.04,
         cargoFront + 0.2 + (i * (cargoLength - 0.4)) / 12,
       );
-    emergencyLights(root, s, b, m, cabRoof);
+    emergencyLights(root, s, b, m, cabRoof, front + cabLength / 2);
     servicePanels(s, m, b, 2.55, center, 2.3);
   } else {
     b.box(W * 0.94, H - 1.05, cargoLength, m.cargo, 0, (H + 1.05) / 2, center, euler(), 0.045);
