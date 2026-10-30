@@ -31,14 +31,20 @@ test('three centred road modes have the requested direction counts and a legal s
 });
 
 test('run options validate persisted values and identify all nine record buckets', () => {
-  assert.deepEqual(sanitizeRunOptions(null), { mode: 'normal', difficulty: 'medium' });
+  assert.deepEqual(sanitizeRunOptions(null), {
+    mode: 'normal',
+    difficulty: 'medium',
+    laneCount: 5,
+  });
   assert.deepEqual(sanitizeRunOptions({ mode: 'invented', difficulty: 42 }), {
     mode: 'normal',
     difficulty: 'medium',
+    laneCount: 5,
   });
   assert.deepEqual(sanitizeRunOptions({ mode: 'two-way', difficulty: 'easy' }), {
     mode: 'two-way',
     difficulty: 'easy',
+    laneCount: 4,
   });
   assert.equal(
     new Set(
@@ -58,4 +64,27 @@ test('difficulty increases road pressure and energy cost while preserving warnin
   assert.ok(
     easy.groundRecharge > medium.groundRecharge && medium.groundRecharge > hard.groundRecharge,
   );
+});
+
+test('custom lane counts are centred, validated and isolated in saved record keys', () => {
+  for (const mode of ['normal', 'two-way', 'opposite'] as const) {
+    const minimum = mode === 'two-way' ? 2 : 1;
+    for (let count = minimum; count <= 7; count++) {
+      const options = sanitizeRunOptions({ mode, difficulty: 'medium', laneCount: count });
+      assert.equal(options.laneCount, count);
+      const road = roadFor(mode, count);
+      assert.equal(road.lanes.length, count);
+      assert.equal(
+        road.lanes.reduce((sum, lane) => sum + lane, 0),
+        0,
+      );
+      assert.ok(road.lanes.includes(road.startLane));
+      assert.equal(roadFor(mode, count), road, 'the same immutable layout is cached');
+    }
+  }
+  assert.equal(sanitizeRunOptions({ mode: 'two-way', laneCount: 1 }).laneCount, 2);
+  assert.equal(sanitizeRunOptions({ mode: 'normal', laneCount: 99 }).laneCount, 7);
+  assert.equal(sanitizeRunOptions({ mode: 'opposite', laneCount: -2 }).laneCount, 1);
+  assert.equal(runKey({ mode: 'normal', difficulty: 'medium', laneCount: 5 }), 'normal:medium');
+  assert.notEqual(runKey({ mode: 'normal', difficulty: 'medium', laneCount: 7 }), 'normal:medium');
 });

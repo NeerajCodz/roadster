@@ -14,11 +14,11 @@ export const GANTRY_LAYOUT = {
 export const PLAYER_BODY = { width: 2.23, height: 1.12, length: 4.3 } as const;
 
 /** Preserve the outside-lane flight gaps as the carriageway gets narrower. */
-export function gantryFor(mode: RoadModeId) {
-  const lanes = roadFor(mode).lanes.length;
+export function gantryFor(mode: RoadModeId, laneCount?: number) {
+  const lanes = roadFor(mode, laneCount).lanes.length;
   return {
     ...GANTRY_LAYOUT,
-    panel: { ...GANTRY_LAYOUT.panel, width: lanes * LANE_WIDTH - 6 },
+    panel: { ...GANTRY_LAYOUT.panel, width: Math.max(1.2, lanes * LANE_WIDTH - 6) },
     beam: { ...GANTRY_LAYOUT.beam, width: lanes * LANE_WIDTH + 6 },
   };
 }

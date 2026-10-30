@@ -49,7 +49,7 @@ test('run options sanitize unknown values and can only configure a run from its 
   );
   const game = new Simulation(14);
   assert.equal(game.configure({ mode: 'two-way', difficulty: 'easy' }), true);
-  assert.deepEqual(game.state.options, { mode: 'two-way', difficulty: 'easy' });
+  assert.deepEqual(game.state.options, sanitizeRunOptions({ mode: 'two-way', difficulty: 'easy' }));
   game.start();
   assert.equal(game.configure({ mode: 'opposite', difficulty: 'hard' }), false);
   game.pause();
@@ -59,11 +59,14 @@ test('run options sanitize unknown values and can only configure a run from its 
   game.update(1 / 60, input());
   assert.equal(game.state.status, 'crashed');
   assert.equal(game.configure({ mode: 'normal', difficulty: 'hard' }), false);
-  assert.deepEqual(game.state.options, { mode: 'two-way', difficulty: 'easy' });
+  assert.deepEqual(game.state.options, sanitizeRunOptions({ mode: 'two-way', difficulty: 'easy' }));
   game.menu();
   assert.equal(game.configure({ mode: 'opposite', difficulty: 'hard' }), true);
   game.start();
-  assert.deepEqual(game.state.options, { mode: 'opposite', difficulty: 'hard' });
+  assert.deepEqual(
+    game.state.options,
+    sanitizeRunOptions({ mode: 'opposite', difficulty: 'hard' }),
+  );
 });
 
 for (const road of roads)
@@ -72,7 +75,7 @@ for (const road of roads)
     test(`${road.mode}/${difficulty}: starts in its real lane and steering/rolls clamp to road edges`, () => {
       const game = new Simulation(37, options);
       game.start();
-      assert.deepEqual(game.state.options, options);
+      assert.deepEqual(game.state.options, sanitizeRunOptions(options));
       assert.equal(game.state.lane, road.start);
       assert.equal(game.state.x, road.start * 3.6);
       for (let i = 0; i < 8; i++) edge(game, { left: true });
@@ -301,15 +304,18 @@ test('pause freezes configured traffic and retry repeats the same seeded run wit
   tick(first, 1, input({ left: true, fly: true }));
   assert.deepEqual(first.state, paused);
   first.resume();
-  assert.deepEqual(first.state.options, options);
+  assert.deepEqual(first.state.options, sanitizeRunOptions(options));
   first.start();
   first.state.invincible = 1000;
   play(first);
   assert.deepEqual(first.state, second.state);
   first.menu();
-  assert.deepEqual(first.state.options, options);
+  assert.deepEqual(first.state.options, sanitizeRunOptions(options));
   first.start({ difficulty: 'easy' });
-  assert.deepEqual(first.state.options, { mode: 'two-way', difficulty: 'easy' });
+  assert.deepEqual(
+    first.state.options,
+    sanitizeRunOptions({ mode: 'two-way', difficulty: 'easy' }),
+  );
   assert.equal(first.state.distance, 0);
 });
 

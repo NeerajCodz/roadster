@@ -3,11 +3,20 @@ export type DifficultyId = 'easy' | 'medium' | 'hard';
 export interface RunOptions {
   readonly mode: RoadModeId;
   readonly difficulty: DifficultyId;
+  readonly laneCount?: number;
+}
+export interface ResolvedRunOptions extends RunOptions {
+  readonly laneCount: number;
 }
 export const LANE_WIDTH = 3.6;
-export const DEFAULT_RUN_OPTIONS: RunOptions = Object.freeze({
+export const LANE_COUNTS: readonly number[] = Object.freeze([1, 2, 3, 4, 5, 6, 7]);
+const TWO_WAY_COUNTS = Object.freeze([2, 3, 4, 5, 6, 7]);
+export const laneCountsFor = (mode: RoadModeId): readonly number[] =>
+  mode === 'two-way' ? TWO_WAY_COUNTS : LANE_COUNTS;
+export const DEFAULT_RUN_OPTIONS: ResolvedRunOptions = Object.freeze({
   mode: 'normal',
   difficulty: 'medium',
+  laneCount: 5,
 });
 export interface RoadDefinition {
   readonly id: RoadModeId;
@@ -167,22 +176,52 @@ export const DIFFICULTIES: readonly DifficultyProfile[] = Object.freeze([
     rampEvery: 5,
   }),
 ]);
-export const roadFor = (id: RoadModeId): RoadDefinition =>
-  ROAD_MODES.find((road) => road.id === id) ?? ROAD_MODES[0];
+const roadCache = new Map<string, RoadDefinition>();
+function normalizeLaneCount(mode: RoadDefinition, value: unknown): number {
+  return typeof value === 'number' && Number.isInteger(value)
+    ? Math.max(mode.id === 'two-way' ? 2 : 1, Math.min(7, value))
+    : mode.lanes.length;
+}
+export function roadFor(id: RoadModeId, laneCount?: number): RoadDefinition {
+  const mode = ROAD_MODES.find((road) => road.id === id) ?? ROAD_MODES[0];
+  const count = normalizeLaneCount(mode, laneCount),
+    key = `${mode.id}:${count}`;
+  let result = roadCache.get(key);
+  if (!result) {
+    const lanes = Array.from({ length: count }, (_, i) => i - (count - 1) / 2);
+    const description =
+      mode.id === 'two-way'
+        ? `${Math.floor(count / 2)} oncoming, ${Math.ceil(count / 2)} with you. Watch the centre line.`
+        : mode.id === 'opposite'
+          ? `${count} oncoming lane${count === 1 ? '' : 's'}. ${count === 1 ? 'Use flight to clear traffic.' : 'Watch for headlights and faster closing speeds.'}`
+          : `${count} lane${count === 1 ? '' : 's'} travelling with you.${count === 1 ? ' Use flight to clear traffic.' : ''}`;
+    result = road(mode.id, mode.label, description, lanes, count % 2 ? 0 : 0.5);
+    roadCache.set(key, result);
+  }
+  return result;
+}
 export const difficultyFor = (id: DifficultyId): DifficultyProfile =>
   DIFFICULTIES.find((level) => level.id === id) ?? DIFFICULTIES[1];
 export function directionForLane(mode: RoadModeId, lane: number): 1 | -1 {
   return mode === 'opposite' || (mode === 'two-way' && lane < 0) ? -1 : 1;
 }
-export function sanitizeRunOptions(value: unknown): RunOptions {
+export function sanitizeRunOptions(value: unknown): ResolvedRunOptions {
   const saved = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+  const mode = ROAD_MODES.find((road) => road.id === saved.mode) ?? ROAD_MODES[0];
   return Object.freeze({
-    mode: ROAD_MODES.find((road) => road.id === saved.mode)?.id ?? DEFAULT_RUN_OPTIONS.mode,
+    mode: mode.id,
     difficulty:
       DIFFICULTIES.find((level) => level.id === saved.difficulty)?.id ??
       DEFAULT_RUN_OPTIONS.difficulty,
+    laneCount: normalizeLaneCount(mode, saved.laneCount),
   });
 }
-export const runKey = (options: RunOptions) => `${options.mode}:${options.difficulty}`;
+export const runKey = (options: RunOptions) => {
+  const selected = roadFor(options.mode, options.laneCount);
+  const base = `${selected.id}:${options.difficulty}`;
+  return selected.lanes.length === roadFor(options.mode).lanes.length
+    ? base
+    : `${base}:${selected.lanes.length}`;
+};
 export const runLabel = (options: RunOptions) =>
-  `${roadFor(options.mode).label} / ${difficultyFor(options.difficulty).label}`;
+  `${roadFor(options.mode).label} / ${roadFor(options.mode, options.laneCount).lanes.length} ${roadFor(options.mode, options.laneCount).lanes.length === 1 ? 'lane' : 'lanes'} / ${difficultyFor(options.difficulty).label}`;

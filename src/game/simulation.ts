@@ -9,6 +9,7 @@ import {
   roadFor,
   sanitizeRunOptions,
   type RunOptions,
+  type ResolvedRunOptions,
 } from './run-settings';
 
 export type GameStatus = 'menu' | 'playing' | 'paused' | 'crashed';
@@ -35,7 +36,7 @@ export interface GameEvent {
   label?: string;
 }
 export interface GameState {
-  readonly options: RunOptions;
+  readonly options: ResolvedRunOptions;
   status: GameStatus;
   time: number;
   distance: number;
@@ -81,7 +82,10 @@ export const EMPTY_CONTROLS: Controls = Object.freeze({
   rollRight: false,
 });
 
-const freshState = (status: GameStatus, options: RunOptions = DEFAULT_RUN_OPTIONS): GameState => ({
+const freshState = (
+  status: GameStatus,
+  options: ResolvedRunOptions = DEFAULT_RUN_OPTIONS,
+): GameState => ({
   options,
   status,
   time: 0,
@@ -89,8 +93,8 @@ const freshState = (status: GameStatus, options: RunOptions = DEFAULT_RUN_OPTION
   score: 0,
   bolts: 0,
   speed: difficultyFor(options.difficulty).cruiseSpeed,
-  lane: roadFor(options.mode).startLane,
-  x: roadFor(options.mode).startLane * LANE_WIDTH,
+  lane: roadFor(options.mode, options.laneCount).startLane,
+  x: roadFor(options.mode, options.laneCount).startLane * LANE_WIDTH,
   y: 0,
   vy: 0,
   air: 100,
@@ -156,7 +160,7 @@ export class Simulation {
   }
 
   private get road() {
-    return roadFor(this.state.options.mode);
+    return roadFor(this.state.options.mode, this.state.options.laneCount);
   }
   private get rules() {
     return difficultyFor(this.state.options.difficulty);
@@ -165,6 +169,7 @@ export class Simulation {
     return 1 << this.road.lanes.indexOf(lane);
   }
   private get maxBlockedLanes() {
+    if (this.road.lanes.length === 1) return 1;
     return this.road.lanes.length - (this.road.lanes.length >= 4 ? 2 : 1);
   }
 
@@ -194,11 +199,11 @@ export class Simulation {
     for (let i = 0; i < 5; i++) this.add('pickup', start, -38 - i * 13, 1.15, 'bolt');
     // A clear centre lane gives a new player time to read the road.
     const opening =
-      this.state.options.mode === 'normal'
+      this.state.options.mode === 'normal' && this.road.lanes.length === 5
         ? [-1, 1]
         : this.road.lanes.filter((lane) => lane !== start);
-    this.add('traffic', opening[0], -160);
-    this.add('traffic', opening[opening.length - 1], -190);
+    if (opening.length) this.add('traffic', opening[0], -160);
+    if (opening.length > 1) this.add('traffic', opening[opening.length - 1], -190);
     this.add('ramp', start, -245);
     this.state.events.push({ type: 'start' });
   }
@@ -459,7 +464,7 @@ export class Simulation {
 
   private collideGantries(distance: number, x: number, y: number): void {
     const s = this.state;
-    const layout = gantryFor(s.options.mode);
+    const layout = gantryFor(s.options.mode, s.options.laneCount);
     const halfLength = PLAYER_BODY.length / 2;
     const firstCycle = Math.max(
       0,
@@ -576,7 +581,11 @@ export class Simulation {
     }
     // Stagger a solid pack well ahead of the player, leaving a longitudinal escape
     // instead of directing a driver to make a sudden nearby lane change.
-    if (entity.z < -95 && packLanes === (1 << this.road.lanes.length) - 1)
+    if (
+      this.road.lanes.length > 1 &&
+      entity.z < -95 &&
+      packLanes === (1 << this.road.lanes.length) - 1
+    )
       targetSpeed = Math.min(targetSpeed, 6);
     const previousSpeed = motion.speed ?? baseSpeed;
     const actualSpeed = Math.max(
@@ -791,6 +800,10 @@ export class Simulation {
   private spawnWave(): void {
     const s = this.state;
     this.wave++;
+    if (this.road.lanes.length === 1) {
+      this.spawnSingleLaneWave();
+      return;
+    }
     const lanes = [...this.road.lanes];
     // Never block the whole road: every wave retains at least two open lanes.
     for (let i = lanes.length - 1; i > 0; i--) {
@@ -862,6 +875,20 @@ export class Simulation {
     }
   }
 
+  /** A single lane trades steering escapes for well-separated flight encounters. */
+  private spawnSingleLaneWave(): void {
+    const s = this.state;
+    const ahead = Math.max(this.rules.spawnAhead, this.rules.rocketSpeed * 3.2 + 20);
+    const aerial = s.distance > this.rules.aerialAfter && this.wave % this.rules.aerialEvery === 0;
+    // Alternate traffic and a readable barricade; the air route stays below sky hazards.
+    const kind = this.wave % 2 === 0 || aerial ? 'barrier' : 'traffic';
+    this.add(kind, 0, -ahead, aerial ? 8 : 0);
+    // A launch/refill route is encountered before the obstruction, with room to land.
+    if (!aerial && this.wave % this.rules.rampEvery === 0) this.add('ramp', 0, -ahead + 95);
+    this.add('pickup', 0, -ahead + 85, 1.15, this.wave % 2 === 0 ? 'air' : 'bolt');
+    if (aerial) this.add('pickup', 0, -ahead + 40, 4.8, 'bolt');
+  }
+
   private chooseTrafficVariant(): number {
     const total = TRAFFIC_CATALOG.reduce((sum, spec) => sum + spec.weight, 0);
     let sample = this.random() * total;
@@ -889,6 +916,18 @@ export class Simulation {
               ? BARRICADE_BODY.depth
               : 0;
       const gap = Math.abs(other.z - z);
+      if (this.road.lanes.length === 1 && (other.kind === 'traffic' || other.kind === 'barrier')) {
+        const flightWindow =
+          this.state.options.difficulty === 'easy'
+            ? 3.6
+            : this.state.options.difficulty === 'medium'
+              ? 3.2
+              : 2.8;
+        const closing =
+          this.rules.rocketSpeed +
+          (this.state.options.mode === 'opposite' ? 32 * this.rules.trafficSpeed : 0);
+        if (gap < closing * flightWindow + (length + otherLength) / 2) return false;
+      }
       if (
         sameLane &&
         gap <
@@ -946,11 +985,20 @@ export class Simulation {
     pickup?: PickupKind,
     selectedVariant?: number,
   ): void {
+    if (!this.road.lanes.includes(lane)) return;
     const variant =
       selectedVariant ??
       (kind === 'traffic'
         ? this.chooseTrafficVariant()
         : Math.floor(this.random() * TRAFFIC_CATALOG.length));
+    if (kind === 'traffic' && this.road.lanes.length === 1) {
+      const closing =
+        this.rules.rocketSpeed +
+        (this.state.options.mode === 'opposite'
+          ? trafficSpec(variant).cruiseSpeed * this.rules.trafficSpeed
+          : 0);
+      z = Math.min(z, -closing * 3.2 - 20);
+    }
     if (
       kind === 'traffic' &&
       this.state.entities.filter((entity) => entity.kind === 'traffic').length >=
