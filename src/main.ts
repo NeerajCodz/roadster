@@ -13,7 +13,6 @@ import {
   DIFFICULTIES,
   ROAD_MODES,
   difficultyFor,
-  roadFor,
   runLabel,
   sanitizeRunOptions,
   type RunOptions,
@@ -1119,7 +1118,9 @@ function frame(now: number) {
     ))
       button.classList.toggle('cooling', rollReadiness !== 'ready');
     hud.altitude.textContent = s.y > 0.5 ? `${s.y.toFixed(1)} M ALTITUDE` : 'GROUND LEVEL';
-    const speedAmount = Math.floor((s.speed / 86) * 16);
+    const speedAmount = Math.floor(
+      (s.speed / difficultyFor(s.options.difficulty).rocketSpeed) * 16,
+    );
     document
       .querySelectorAll('.speed-bars i')
       .forEach((el, i) => el.classList.toggle('lit', i < speedAmount));
