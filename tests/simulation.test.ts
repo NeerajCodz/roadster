@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { trafficBounds } from '../src/game/traffic-catalog.ts';
 import {
   EMPTY_CONTROLS,
   Simulation,
@@ -475,7 +476,7 @@ test('traffic collision height follows the actual vehicle body', () => {
   assert.equal(van.state.status, 'crashed', 'a tall van still occupies this height');
 });
 
-test('long vehicle collision reaches farther forward without an oversized carrier hitbox', () => {
+test('long vehicle collision matches the full-size visible body', () => {
   const sedan = playing();
   const bus = playing();
   const carrier = playing();
@@ -487,8 +488,8 @@ test('long vehicle collision reaches farther forward without an oversized carrie
   assert.equal(bus.state.status, 'crashed');
   assert.equal(
     carrier.state.status,
-    'playing',
-    'the carrier is rendered at no more than six metres long',
+    'crashed',
+    'the full-size carrier has the same long physical and visible body',
   );
 });
 
@@ -504,7 +505,7 @@ test('descending onto a traffic roof lands safely and awards one roof ride', () 
   assert.equal(game.state.vy, 0);
   assert.equal(game.state.events.filter((event) => event.label === 'ROOF RIDE').length, 1);
   assert.ok(game.state.score >= 100);
-  advance(game, 0.5, controls(), false);
+  advance(game, 0.8, controls(), false);
   assert.equal(game.state.status, 'playing');
   assert.equal(game.state.y, 0, 'the player drops back to the road after the vehicle passes');
 });
@@ -538,17 +539,17 @@ test('generated roads include all traffic styles and aerial hazards with open la
           game.state.entities
             .filter(
               (other) =>
-                other.kind !== 'pickup' &&
-                other.kind !== 'ramp' &&
+                other.kind === 'barrier' &&
+                Math.abs(other.y - entity.y) < 2 &&
                 Math.abs(other.z - entity.z) < 8,
             )
             .map((other) => other.lane),
         );
-        assert.ok(blocked.size < 5, 'a hazard row always leaves a lane open');
+        assert.ok(blocked.size < 5, 'each aerial hazard row leaves room at its own altitude');
       }
     }
   }
-  assert.equal(variants.size, 9);
+  assert.ok(variants.size >= 20, 'the expanded fleet appears in normal seeded traffic');
   assert.ok(aerialBarrier, 'flight has an overhead hazard to avoid');
 });
 
@@ -945,4 +946,100 @@ test('a kilometre milestone grants its score bonus once, including the active mu
   const score = game.state.score;
   game.update(1 / 120, controls());
   assert.ok(game.state.score - score < 10, 'the same milestone cannot grant its bonus twice');
+});
+
+test('progressive NPC population becomes dense and varied without blocking every ground lane', () => {
+  const variants = new Set<number>();
+  let maxCount = 0,
+    sampled = 0,
+    totalCount = 0;
+  for (const seed of [3, 17, 123, 999]) {
+    const game = new Simulation(seed);
+    game.start();
+    game.state.invincible = 1000;
+    for (let frame = 0; frame < 7200; frame++) {
+      game.update(1 / 60, controls({ accelerate: true }));
+      const cars = game.state.entities.filter((e) => e.kind === 'traffic');
+      for (const car of cars) {
+        assert.equal(car.y, 0);
+        variants.add(car.variant);
+      }
+      assert.ok(cars.length <= 60, 'traffic count must remain bounded');
+      if (game.state.distance > 1800 && frame % 60 === 0) {
+        sampled++;
+        totalCount += cars.length;
+        maxCount = Math.max(maxCount, cars.length);
+      }
+      if (frame % 12 === 0) {
+        const blocked = new Set(
+          cars
+            .filter((e) => Math.abs(e.z) < (trafficBounds(e.variant).length + 4.3) / 2 - 0.45)
+            .map((e) => e.lane),
+        );
+        assert.ok(
+          blocked.size < 5,
+          `seed ${seed}: traffic leaves an escape lane at player contact`,
+        );
+      }
+    }
+  }
+  assert.equal(variants.size, 24, 'the entire weighted fleet is reachable');
+  assert.ok(
+    maxCount >= 28 && totalCount / sampled >= 24,
+    `traffic is too sparse: max ${maxCount}, average ${totalCount / sampled}`,
+  );
+});
+test('new ground obstacles never spawn through traffic, barricades or reserved rewards', () => {
+  const game = new Simulation(31);
+  game.start();
+  game.state.invincible = 1000;
+  let lastId = Math.max(...game.state.entities.map((e) => e.id));
+  for (let frame = 0; frame < 5400; frame++) {
+    game.update(1 / 60, controls({ accelerate: true }));
+    const born = game.state.entities.filter(
+      (e) => e.id > lastId && (e.kind === 'traffic' || (e.kind === 'barrier' && e.y === 0)),
+    );
+    for (const car of born) {
+      for (const other of game.state.entities) {
+        if (other.id === car.id || other.y > 3 || Math.abs(other.x - car.x) > 2) continue;
+        if (other.kind === 'traffic' || other.kind === 'barrier')
+          assert.ok(Math.abs(other.z - car.z) > 20, 'new vehicle needs physical headway');
+        if (other.kind === 'pickup' || other.kind === 'ramp')
+          assert.ok(Math.abs(other.z - car.z) > 25, 'reward routes stay clear');
+      }
+    }
+    lastId = Math.max(lastId, ...game.state.entities.map((e) => e.id));
+  }
+});
+
+test('a faster car brakes behind a full-size semi and keeps physical headway', () => {
+  const game = playing();
+  const leader = obstacle({ id: 101, variant: 23, z: -350 });
+  const follower = obstacle({ id: 102, variant: 9, z: -322 });
+  game.state.entities = [leader, follower];
+  game.state.invincible = 100;
+  let braked = false;
+  for (let frame = 0; frame < 360; frame++) {
+    game.update(1 / 60, controls({ accelerate: true }));
+    braked ||= !!follower.braking;
+    if (Math.abs(leader.x - follower.x) < 1.9) {
+      const bodyGap =
+        (trafficBounds(leader.variant).length + trafficBounds(follower.variant).length) / 2;
+      assert.ok(follower.z - leader.z >= bodyGap + 6.9, 'the car must not drive into the trailer');
+    }
+  }
+  assert.ok(braked, 'following slower traffic activates the brake lights');
+});
+
+test('NPCs slow behind grounded barricades instead of driving through them', () => {
+  const game = playing();
+  const barrier = obstacle({ id: 101, kind: 'barrier', z: -350 });
+  const car = obstacle({ id: 102, variant: 9, z: -310 });
+  game.state.entities = [barrier, car];
+  game.state.invincible = 100;
+  for (let frame = 0; frame < 240; frame++) {
+    game.update(1 / 60, controls({ accelerate: true }));
+    if (Math.abs(barrier.x - car.x) < 1.9)
+      assert.ok(car.z - barrier.z >= (trafficBounds(car.variant).length + 0.85) / 2 + 6.9);
+  }
 });

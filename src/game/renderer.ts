@@ -11,6 +11,8 @@ import { spinWheels } from './vehicle';
 import { carById, FACTORY, FINISH_PARAMS, type CarLook } from './cars';
 import { GANTRY_LAYOUT } from './road-layout';
 import { animateBarricade, createBarricade } from './barricade';
+import { TRAFFIC_CATALOG, TRAFFIC_PAINTS, trafficSpec } from './traffic-catalog';
+import { animateTrafficVehicle, createTrafficVehicle } from './traffic-model';
 import {
   createTrafficLights,
   disposeInstanceBuffers,
@@ -29,17 +31,6 @@ const FLAME_SLOTS = 4;
 const RIM_VIEW_YAW = -1.3;
 const wrapAngle = (angle: number) =>
   THREE.MathUtils.euclideanModulo(angle + Math.PI, Math.PI * 2) - Math.PI;
-const TRAFFIC_TYPES = [
-  'sedan',
-  'hatch',
-  'suv',
-  'taxi',
-  'van',
-  'pickup',
-  'boxtruck',
-  'bus',
-  'carrier',
-];
 const SCENERY_LENGTH = GANTRY_LAYOUT.repeatLength;
 
 export class GameRenderer {
@@ -83,7 +74,7 @@ export class GameRenderer {
       : null;
   private modelCache = new Map<string, THREE.Group>();
   private modelLoads = new Map<string, Promise<THREE.Group | null>>();
-  private trafficTemplates: THREE.Group[] = [];
+  private trafficTemplates = new Map<number, THREE.Group>();
   private entityTemplates = new Map<string, THREE.Group>();
   private entityPools = new Map<string, THREE.Group[]>();
   private trafficLights = new Map<THREE.Group, TrafficLights>();
@@ -217,7 +208,6 @@ export class GameRenderer {
     this.camera.position.set(5.5, 2.4, 6.2);
     this.camera.lookAt(-4.5, 0.65, -0.3);
     void this.loadCar(carById('roadster').model);
-    void this.loadTraffic();
   }
 
   async loadCar(path: string) {
@@ -941,83 +931,6 @@ export class GameRenderer {
     return group;
   }
 
-  private async loadTraffic() {
-    try {
-      const gltf = await new GLTFLoader().loadAsync(asset('reference/models/traffic.glb'));
-      if (this.disposed) {
-        this.disposeObjects([gltf.scene]);
-        return;
-      }
-      this.ownedRoots.add(gltf.scene);
-      const colors = [
-        '#b65342',
-        '#ddd4bf',
-        '#7d9199',
-        '#e1b74c',
-        '#c3c9bf',
-        '#527773',
-        '#afc0bf',
-        '#c9ae70',
-        '#9e4940',
-      ];
-      for (const [index, type] of TRAFFIC_TYPES.entries()) {
-        const source = gltf.scene.getObjectByName(type);
-        if (!source) throw new Error(`Traffic model is missing ${type}`);
-        const model = source.clone(true);
-        const materials = new Map<THREE.Material, THREE.Material>();
-        model.traverse((object) => {
-          if (!(object instanceof THREE.Mesh)) return;
-          object.castShadow = true;
-          object.receiveShadow = true;
-          const cloneMaterial = (original: THREE.Material) => {
-            let copy = materials.get(original);
-            if (!copy) {
-              copy = original.clone();
-              materials.set(original, copy);
-              if (copy instanceof THREE.MeshStandardMaterial) {
-                if (/^paint$/i.test(copy.name)) copy.color.set(colors[index]);
-                if (/headlight/i.test(copy.name)) {
-                  copy.emissive.set('#fff0c8');
-                  copy.emissiveIntensity = 0.8;
-                }
-                if (/^brake$/i.test(copy.name)) {
-                  copy.emissive.set('#e52e20');
-                  copy.emissiveIntensity = 0.9;
-                }
-              }
-            }
-            return copy;
-          };
-          object.material = Array.isArray(object.material)
-            ? object.material.map(cloneMaterial)
-            : cloneMaterial(object.material);
-        });
-        model.updateMatrixWorld(true);
-        const bounds = new THREE.Box3().setFromObject(model, true);
-        const size = bounds.getSize(new THREE.Vector3());
-        const center = bounds.getCenter(new THREE.Vector3());
-        const scale = Math.min(1, 6 / Math.max(size.z, 0.001));
-        model.position.x -= center.x;
-        model.position.y -= bounds.min.y;
-        model.position.z -= center.z;
-        const template = new THREE.Group();
-        template.add(model);
-        template.scale.setScalar(scale);
-        template.userData.bounds = {
-          width: size.x * scale,
-          height: size.y * scale,
-          length: size.z * scale,
-        };
-        template.userData.trafficType = type;
-        this.trafficTemplates[index] = template;
-        this.ownedRoots.add(template);
-      }
-    } catch (error) {
-      if (!this.disposed)
-        console.warn('Using built-in traffic; original traffic asset unavailable.', error);
-    }
-  }
-
   private makeTraffic(variant: number, color?: string) {
     const group = new THREE.Group();
     const colors = ['#a9b9b1', '#e9d9ba', '#8f9baf', '#ba6a52', '#6a7772', '#d5b760'];
@@ -1148,12 +1061,15 @@ export class GameRenderer {
         this.entityMeshes.delete(id);
       }
     for (const entity of entities) {
-      const variant =
-        ((entity.variant % TRAFFIC_TYPES.length) + TRAFFIC_TYPES.length) % TRAFFIC_TYPES.length;
-      const traffic = this.trafficTemplates[variant];
+      const spec = trafficSpec(entity.variant);
+      const variant = TRAFFIC_CATALOG.indexOf(spec);
+      const appearance =
+        spec.livery === 'none'
+          ? Math.abs(Math.trunc(entity.appearance ?? entity.id)) % TRAFFIC_PAINTS.length
+          : 0;
       const key =
         entity.kind === 'traffic'
-          ? `traffic:${traffic ? 'original' : 'fallback'}:${variant}`
+          ? `traffic:${variant}:${appearance}`
           : entity.kind === 'barrier'
             ? `barrier:${entity.y > 0 ? 'flying' : 'ground'}`
             : `${entity.kind}:${entity.pickup ?? ''}`;
@@ -1167,7 +1083,7 @@ export class GameRenderer {
         if (!template) {
           template =
             entity.kind === 'traffic'
-              ? (traffic ?? this.makeTraffic(variant))
+              ? this.fleetTemplate(variant, appearance)
               : this.makePickup(entity);
           this.entityTemplates.set(key, template);
           this.ownedRoots.add(template);
@@ -1183,12 +1099,49 @@ export class GameRenderer {
       group.position.set(entity.x, entity.y, entity.z);
       const lights = this.trafficLights.get(group);
       if (lights) updateTrafficLights(lights, entity, time);
+      if (entity.kind === 'traffic') {
+        const turn =
+          entity.targetLane === undefined
+            ? 0
+            : THREE.MathUtils.clamp((entity.targetLane * 3.6 - entity.x) * -0.04, -0.15, 0.15);
+        animateTrafficVehicle(group, time, entity.speed ?? spec.cruiseSpeed, turn);
+        group.rotation.y = turn * 0.3;
+      }
       if (entity.kind === 'pickup') {
         group.position.y += Math.sin(this.elapsed * 3 + entity.id) * 0.16;
         group.rotation.y += dt * 1.6;
       }
       if (entity.kind === 'barrier') animateBarricade(group, time + entity.id * 0.21);
     }
+  }
+
+  private fleetTemplate(variant: number, appearance: number): THREE.Group {
+    let base = this.trafficTemplates.get(variant);
+    if (!base) {
+      base = createTrafficVehicle(variant);
+      this.trafficTemplates.set(variant, base);
+      this.ownedRoots.add(base);
+    }
+    const template = base.clone(true);
+    const copies = new Map<THREE.Material, THREE.Material>();
+    template.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      const paint = (material: THREE.Material) => {
+        if (!(material instanceof THREE.MeshStandardMaterial) || material.name !== 'Paint')
+          return material;
+        let copy = copies.get(material);
+        if (!copy) {
+          copy = material.clone();
+          (copy as THREE.MeshStandardMaterial).color.set(TRAFFIC_PAINTS[appearance].color);
+          copies.set(material, copy);
+        }
+        return copy;
+      };
+      object.material = Array.isArray(object.material)
+        ? object.material.map(paint)
+        : paint(object.material);
+    });
+    return template;
   }
 
   private releaseEntity(group: THREE.Group) {
@@ -1201,7 +1154,15 @@ export class GameRenderer {
       this.entityPools.set(key, pool);
     }
     // Clones share their prototype's geometry and material. Only the scene nodes are recycled.
-    if (pool.length < 24) pool.push(group);
+    const traffic = key.startsWith('traffic:');
+    const dormantTraffic = traffic
+      ? [...this.entityPools.entries()].reduce(
+          (count, [poolKey, groups]) =>
+            count + (poolKey.startsWith('traffic:') ? groups.length : 0),
+          0,
+        )
+      : 0;
+    if (pool.length < (traffic ? 2 : 24) && (!traffic || dormantTraffic < 96)) pool.push(group);
     else {
       disposeInstanceBuffers(group);
       const lights = this.trafficLights.get(group);
@@ -1350,7 +1311,7 @@ export class GameRenderer {
     this.entityTemplates.clear();
     this.modelCache.clear();
     this.modelLoads.clear();
-    this.trafficTemplates = [];
+    this.trafficTemplates.clear();
     this.ownedRoots.clear();
     this.textures.clear();
   }

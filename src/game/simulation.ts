@@ -1,5 +1,6 @@
 import { GANTRY_LAYOUT, PLAYER_BODY } from './road-layout';
 import { BARRICADE_BODY } from './barricade-layout';
+import { TRAFFIC_CATALOG, TRAFFIC_PAINTS, trafficBounds, trafficSpec } from './traffic-catalog';
 
 export type GameStatus = 'menu' | 'playing' | 'paused' | 'crashed';
 export type PickupKind = 'bolt' | 'air' | 'shield' | 'magnet' | 'double' | 'rocket';
@@ -16,6 +17,8 @@ export interface Entity {
   targetLane?: number;
   signal?: -1 | 0 | 1;
   braking?: boolean;
+  appearance?: number;
+  speed?: number;
 }
 export interface GameEvent {
   type: string;
@@ -99,24 +102,6 @@ const LANE_WIDTH = 3.6;
 const ROLL_DURATION = 0.65;
 // A full roll needs enough tyre clearance for the body to rotate above the surface.
 const ROLL_CLEARANCE = Math.hypot(PLAYER_BODY.width / 2, PLAYER_BODY.height);
-// Original model bounds [width, height, length], shared with renderer.ts.
-// Each traffic model is uniformly scaled so its length never exceeds 6 m.
-const TRAFFIC_BOUNDS = [
-  [1.9, 1.43, 4.64],
-  [1.82, 1.47, 4.04],
-  [2, 1.82, 4.94],
-  [1.92, 1.63, 4.74],
-  [2.06, 2.2, 5.34],
-  [2.02, 1.77, 5.58],
-  [2.43, 3, 8.14],
-  [2.6, 3.16, 12.22],
-  [2.61, 2.98, 16.12],
-] as const;
-const trafficBounds = (variant: number) => {
-  const [width, height, length] = TRAFFIC_BOUNDS[((variant % 9) + 9) % 9];
-  const scale = Math.min(1, 6 / length);
-  return { width: width * scale, height: height * scale, length: length * scale };
-};
 const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value));
 const approach = (value: number, target: number, rate: number, dt: number) =>
   target + (value - target) * Math.exp(-rate * dt);
@@ -128,6 +113,7 @@ interface TrafficMotion {
   warningAt: number;
   movingAt: number | null;
   sourceLane: number;
+  speed?: number;
 }
 
 /** A renderer-independent run. All distances are metres, speeds metres/second.
@@ -150,6 +136,7 @@ export class Simulation {
   private airborneTime = 0;
   private bigAirAwarded = false;
   private resolvedGantry = -1;
+  private nextAmbientDistance = 110;
 
   constructor(seed = 1729) {
     this.seed = seed >>> 0;
@@ -161,6 +148,7 @@ export class Simulation {
     this.randomState = this.seed;
     this.nextId = 1;
     this.nextWaveDistance = 130;
+    this.nextAmbientDistance = 110;
     this.nextMilestone = 1000;
     this.motions.clear();
     this.airborneTime = 0;
@@ -288,8 +276,8 @@ export class Simulation {
     for (const entity of s.entities) {
       const oldZ = entity.z;
       // Traffic travels forward too; stationary pickups/ramps meet the full road speed.
-      const trafficSpeed = entity.kind === 'traffic' ? this.moveTraffic(entity) : 0;
-      entity.z += Math.max(20, s.speed - trafficSpeed) * dt;
+      const trafficSpeed = entity.kind === 'traffic' ? this.moveTraffic(entity, dt) : 0;
+      entity.z += Math.max(0, s.speed - trafficSpeed) * dt;
       const dx = Math.abs(s.x - entity.x);
       if (entity.kind === 'pickup') {
         const magnetic = s.magnet > 0 && entity.pickup === 'bolt';
@@ -397,6 +385,10 @@ export class Simulation {
       this.spawnWave();
       this.nextWaveDistance += Math.max(68, 120 - s.distance / 100);
     }
+    if (s.status === 'playing' && s.time > 2 && s.distance >= this.nextAmbientDistance) {
+      this.spawnAmbientTraffic();
+      this.nextAmbientDistance = s.distance + (s.distance < 800 ? 16 : 12);
+    }
   }
 
   private trick(type: string, label: string, points: number): void {
@@ -475,7 +467,7 @@ export class Simulation {
     }
   }
 
-  private moveTraffic(entity: Entity): number {
+  private moveTraffic(entity: Entity, dt: number): number {
     const s = this.state;
     let motion = this.motions.get(entity.id);
     if (!motion) {
@@ -489,30 +481,57 @@ export class Simulation {
       };
       this.motions.set(entity.id, motion);
     }
-    const baseSpeed = 12 + (entity.variant % 5) * 2.5;
+    const baseSpeed = trafficSpec(entity.variant).cruiseSpeed;
     if (s.time >= motion.brakeAt) {
       if (entity.z < -110) motion.brakeUntil = s.time + 1.2;
       motion.brakeAt = Infinity;
     }
-    const following =
-      entity.z < -95 &&
-      s.entities.some(
-        (other) =>
-          other.id !== entity.id &&
-          other.kind === 'traffic' &&
-          Math.abs(other.y - entity.y) < 3 &&
-          Math.abs(other.x - entity.x) < 1.8 &&
-          entity.z - other.z > 7 &&
-          entity.z - other.z < 24,
-      );
-    entity.braking = entity.z < -65 && (s.time < motion.brakeUntil || following);
-    const actualSpeed = baseSpeed * (entity.braking ? 0.65 : 1);
+    let targetSpeed = baseSpeed * (s.time < motion.brakeUntil ? 0.65 : 1);
+    let safeSpeed = Infinity;
+    const ownLength = trafficBounds(entity.variant).length;
+    let packLanes = 1 << (entity.lane + 2);
+    for (const other of s.entities) {
+      const gap = entity.z - other.z;
+      if (
+        other.id === entity.id ||
+        (other.kind !== 'traffic' && other.kind !== 'barrier') ||
+        other.y !== 0
+      )
+        continue;
+      if (gap > 0 && gap < 55) {
+        packLanes |= 1 << (other.lane + 2);
+        if (other.targetLane !== undefined) packLanes |= 1 << (other.targetLane + 2);
+      }
+      if (Math.abs(other.x - entity.x) > 1.9) continue;
+      const otherLength =
+        other.kind === 'traffic' ? trafficBounds(other.variant).length : BARRICADE_BODY.depth;
+      const followingGap = (ownLength + otherLength) / 2 + 7;
+      if (gap <= 0 || gap > followingGap + 35) continue;
+      const leaderSpeed =
+        other.kind === 'traffic' ? (other.speed ?? trafficSpec(other.variant).cruiseSpeed) : 0;
+      targetSpeed = Math.min(targetSpeed, leaderSpeed + Math.max(0, gap - followingGap) * 0.6);
+      safeSpeed = Math.min(safeSpeed, leaderSpeed + Math.max(0, gap - followingGap) / dt);
+    }
+    // Stagger a solid pack well ahead of the player, leaving a longitudinal escape
+    // instead of directing a driver to make a sudden nearby lane change.
+    if (entity.z < -95 && packLanes === 31) targetSpeed = Math.min(targetSpeed, 6);
+    const previousSpeed = motion.speed ?? baseSpeed;
+    const actualSpeed = Math.max(
+      0,
+      Math.min(
+        safeSpeed,
+        entity.z < -65 ? approach(previousSpeed, targetSpeed, 3, dt) : previousSpeed,
+      ),
+    );
+    motion.speed = actualSpeed;
+    entity.speed = actualSpeed;
+    entity.braking = actualSpeed < baseSpeed - 0.8;
     const relative = Math.max(20, s.speed - baseSpeed * 0.65);
     if (entity.targetLane !== undefined) {
       if (motion.movingAt === null) {
         if (s.time - motion.warningAt >= 1) {
           // Reserve completion distance for an unexpected rocket picked up mid-maneuver.
-          const worstClosing = Math.max(20, 86 - baseSpeed * 0.65);
+          const worstClosing = 86; // A driver may have stopped behind a ground barricade.
           if (
             entity.z < -75 &&
             entity.z < -(35 + worstClosing * LANE_CHANGE_TIME) &&
@@ -567,7 +586,7 @@ export class Simulation {
   }
 
   private destinationClear(entity: Entity, lane: number, horizon: number): boolean {
-    const ownSpeed = (12 + (entity.variant % 5) * 2.5) * (entity.braking ? 0.65 : 1);
+    const ownSpeed = entity.speed ?? trafficSpec(entity.variant).cruiseSpeed;
     return !this.state.entities.some((other) => {
       if (other.id === entity.id || Math.abs(other.y - entity.y) > 3.5) return false;
       const occupiesLane =
@@ -578,11 +597,16 @@ export class Simulation {
       const gap = entity.z - other.z;
       if (other.kind === 'pickup' || other.kind === 'ramp') return Math.abs(gap) < 32;
       const otherSpeed =
-        other.kind === 'traffic'
-          ? (12 + (other.variant % 5) * 2.5) * (other.braking ? 0.65 : 1)
-          : 0;
+        other.kind === 'traffic' ? (other.speed ?? trafficSpec(other.variant).cruiseSpeed) : 0;
       const futureGap = gap + (otherSpeed - ownSpeed) * horizon;
-      return gap * futureGap <= 0 || Math.min(Math.abs(gap), Math.abs(futureGap)) < 24;
+      const bodyGap =
+        (trafficBounds(entity.variant).length +
+          (other.kind === 'traffic' ? trafficBounds(other.variant).length : BARRICADE_BODY.depth)) /
+          2 +
+        12;
+      return (
+        gap * futureGap <= 0 || Math.min(Math.abs(gap), Math.abs(futureGap)) < Math.max(24, bodyGap)
+      );
     });
   }
 
@@ -601,7 +625,7 @@ export class Simulation {
       for (let lane = -2; lane <= 2; lane++)
         if (Math.abs(other.x - lane * LANE_WIDTH) < 2) occupied.add(lane);
     }
-    return occupied.size < 5;
+    return occupied.size < 4;
   }
 
   private roofFloor(): number {
@@ -740,7 +764,106 @@ export class Simulation {
     }
   }
 
-  private add(kind: Entity['kind'], lane: number, z: number, y = 0, pickup?: PickupKind): void {
+  private chooseTrafficVariant(): number {
+    const total = TRAFFIC_CATALOG.reduce((sum, spec) => sum + spec.weight, 0);
+    let sample = this.random() * total;
+    for (const [index, spec] of TRAFFIC_CATALOG.entries()) {
+      sample -= spec.weight;
+      if (sample <= 0) return index;
+    }
+    return 0;
+  }
+
+  private canPlaceRoadObstacle(lane: number, z: number, length: number): boolean {
+    const occupied = new Set<number>([lane]);
+    for (const other of this.state.entities) {
+      if (other.passed || other.y > (other.kind === 'pickup' ? 3 : 1)) continue;
+      const sameLane =
+        other.lane === lane ||
+        other.targetLane === lane ||
+        Math.abs(other.x - lane * LANE_WIDTH) < 2.4;
+      const otherLength =
+        other.kind === 'traffic'
+          ? trafficBounds(other.variant).length
+          : other.kind === 'ramp'
+            ? 6
+            : other.kind === 'barrier'
+              ? BARRICADE_BODY.depth
+              : 0;
+      const gap = Math.abs(other.z - z);
+      if (
+        sameLane &&
+        gap <
+          (other.kind === 'pickup' || other.kind === 'ramp'
+            ? 34
+            : Math.max(24, (length + otherLength) / 2 + 12))
+      )
+        return false;
+      if (
+        (other.kind === 'traffic' || other.kind === 'barrier') &&
+        gap < (length + otherLength) / 2 + 10
+      ) {
+        occupied.add(other.lane);
+        if (other.targetLane !== undefined) occupied.add(other.targetLane);
+        for (let candidate = -2; candidate <= 2; candidate++)
+          if (Math.abs(other.x - candidate * LANE_WIDTH) < 2) occupied.add(candidate);
+      }
+    }
+    return occupied.size < 4;
+  }
+
+  private spawnAmbientTraffic(): void {
+    const s = this.state;
+    const cars = s.entities.filter((entity) => entity.kind === 'traffic');
+    const target = Math.min(42, 10 + Math.floor(s.distance / 50));
+    if (cars.length >= target || s.entities.length >= 190) return;
+    const count = this.random() < 0.35 ? 2 : 1;
+    for (
+      let n = 0;
+      n < count && s.entities.filter((entity) => entity.kind === 'traffic').length < target;
+      n++
+    ) {
+      const variant = this.chooseTrafficVariant();
+      const firstLane = Math.floor(this.random() * 5) - 2;
+      let placed = false;
+      for (let attempt = 0; attempt < 15 && !placed; attempt++) {
+        const lane = ((firstLane + 2 + attempt) % 5) - 2;
+        const z = -300 - this.random() * 170;
+        if (this.canPlaceRoadObstacle(lane, z, trafficBounds(variant).length)) {
+          this.add('traffic', lane, z, 0, undefined, variant);
+          placed = true;
+        }
+      }
+    }
+  }
+
+  private add(
+    kind: Entity['kind'],
+    lane: number,
+    z: number,
+    y = 0,
+    pickup?: PickupKind,
+    selectedVariant?: number,
+  ): void {
+    const variant =
+      selectedVariant ??
+      (kind === 'traffic'
+        ? this.chooseTrafficVariant()
+        : Math.floor(this.random() * TRAFFIC_CATALOG.length));
+    if (
+      kind === 'traffic' &&
+      this.state.entities.filter((entity) => entity.kind === 'traffic').length >= 60
+    )
+      return;
+    if (
+      (kind === 'traffic' || (kind === 'barrier' && y === 0)) &&
+      !this.canPlaceRoadObstacle(
+        lane,
+        z,
+        kind === 'traffic' ? trafficBounds(variant).length : BARRICADE_BODY.depth,
+      )
+    )
+      return;
     const entity: Entity = {
       id: this.nextId++,
       kind,
@@ -748,8 +871,13 @@ export class Simulation {
       x: lane * LANE_WIDTH,
       y,
       z,
-      variant: Math.floor(this.random() * 9),
+      variant,
     };
+    if (kind === 'traffic')
+      entity.appearance =
+        trafficSpec(variant).livery === 'none'
+          ? Math.floor(this.random() * TRAFFIC_PAINTS.length)
+          : 0;
     if (pickup) entity.pickup = pickup;
     this.state.entities.push(entity);
   }
