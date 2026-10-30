@@ -136,13 +136,13 @@ test('traffic collision crashes and later updates cannot resume a crashed run', 
   assert.equal(game.state.distance, distance);
 });
 
-test('flying over ground traffic avoids collision but matching sky traffic hits', () => {
+test('flying over ground traffic avoids collision but a sky barricade still hits', () => {
   const game = playing();
   game.state.y = 8;
   game.state.entities = [obstacle()];
   game.update(1 / 60, controls());
   assert.equal(game.state.status, 'playing');
-  game.state.entities = [obstacle({ y: 8 })];
+  game.state.entities = [obstacle({ kind: 'barrier', y: 8 })];
   game.update(1 / 60, controls());
   assert.equal(game.state.status, 'crashed');
 });
@@ -150,7 +150,7 @@ test('flying over ground traffic avoids collision but matching sky traffic hits'
 test('barrel roll grants collision protection and cannot repeat from a held key', () => {
   const game = playing();
   game.state.y = 5;
-  game.state.entities = [obstacle({ y: 5 })];
+  game.state.entities = [obstacle({ kind: 'barrier', y: 5 })];
   game.update(1 / 60, controls({ rollLeft: true }));
   assert.equal(game.state.status, 'playing');
   assert.ok(game.state.roll > 0 && game.state.invincible > 0);
@@ -701,7 +701,7 @@ test('later aerial formations provide paired altitudes and a clear rising/fallin
       assert.ok(arc[0].y < 2 && arc[arc.length - 1].y < 2);
       assert.ok(arc[Math.floor(arc.length / 2)].y > 5);
       assert.equal(new Set(arc.map((entity) => entity.lane)).size, 1);
-      assert.ok(added.filter((entity) => entity.kind === 'traffic' && entity.y > 6).length >= 2);
+      assert.ok(added.filter((entity) => entity.kind === 'barrier' && entity.y > 6).length >= 2);
       assert.ok(
         added
           .filter((entity) => entity.kind === 'traffic' || entity.kind === 'barrier')
@@ -841,6 +841,97 @@ test('gantries repeat after one kilometre and retry restores the first collision
     'crashed',
     'retry resets passed gantry bookkeeping and distance phase',
   );
+});
+
+test('generated traffic stays on the road while airborne barricades retain varied heights', () => {
+  const heights = new Set<number>();
+  let groundTraffic = 0;
+  for (const seed of [0, 1, 2, 4, 19, 42, 123, 321, 999, 1729, 65535, 2147483647]) {
+    const game = new Simulation(seed);
+    game.start();
+    game.state.invincible = 1000;
+    for (let frame = 0; frame < 5400; frame++) {
+      game.update(1 / 60, controls({ accelerate: frame % 1200 > 600 }));
+      for (const entity of game.state.entities) {
+        if (entity.kind === 'traffic') {
+          assert.equal(
+            entity.y,
+            0,
+            `seed ${seed}, distance ${game.state.distance}: traffic must never fly`,
+          );
+          groundTraffic++;
+        } else if (entity.kind === 'barrier' && entity.y > 0) {
+          heights.add(entity.y);
+          assert.equal(entity.targetLane, undefined);
+          assert.ok(!entity.signal && !entity.braking, 'barricades have no traffic maneuvers');
+        }
+      }
+    }
+    assert.ok(game.state.distance > 4000, 'the run must include late waves');
+  }
+  assert.ok(groundTraffic > 0, 'the change preserves road traffic');
+  assert.ok(
+    heights.size > 4 && heights.has(7.5) && heights.has(11.5),
+    'random sky hazards and high/low pairs remain',
+  );
+});
+
+test('barricade collision covers the full 1.7m frame and 0.85m foot depth', () => {
+  const top = playing();
+  top.state.y = 1.45;
+  top.state.entities = [obstacle({ kind: 'barrier', z: -1 })];
+  top.update(1 / 120, controls());
+  assert.equal(top.state.status, 'crashed', 'the upper rail occupies this height');
+  const feet = playing();
+  feet.state.entities = [obstacle({ kind: 'barrier', z: 2.1 })];
+  feet.update(1 / 120, controls());
+  assert.equal(
+    feet.state.status,
+    'crashed',
+    'the physical foot still overlaps the back of the player',
+  );
+  for (const [gap, status] of [
+    [2.3, 'crashed'],
+    [2.4, 'playing'],
+  ] as const) {
+    const game = playing();
+    game.state.entities = [obstacle({ kind: 'barrier', x: gap, z: -1 })];
+    game.update(1 / 120, controls());
+    assert.equal(
+      game.state.status,
+      status,
+      'the 3m-wide frame keeps the existing collision forgiveness',
+    );
+  }
+});
+
+test('flying barricades hit only their frame height and their underbody boosters remain noncolliding', () => {
+  for (const [height, status] of [
+    [0, 'playing'],
+    [6.7, 'playing'],
+    [8.5, 'crashed'],
+    [9.5, 'crashed'],
+    [9.8, 'playing'],
+  ] as const) {
+    const game = playing();
+    game.state.y = height;
+    game.state.entities = [obstacle({ kind: 'barrier', y: 8, z: -1 })];
+    game.update(1 / 120, controls());
+    assert.equal(game.state.status, status, `player feet at ${height}m`);
+  }
+});
+
+test('airborne barricades keep their lane and advance by road travel without traffic AI', () => {
+  const game = playing();
+  game.state.entities = [obstacle({ kind: 'barrier', x: 7.2, lane: 2, y: 11.5, z: -200 })];
+  const entity = game.state.entities[0];
+  const before = game.state.distance;
+  advance(game, 1, controls(), false);
+  assert.ok(Math.abs(entity.z + 200 - (game.state.distance - before)) < 1e-8);
+  assert.equal(entity.x, 7.2);
+  assert.equal(entity.y, 11.5);
+  assert.equal(entity.targetLane, undefined);
+  assert.ok(!entity.signal && !entity.braking);
 });
 
 test('a kilometre milestone grants its score bonus once, including the active multiplier', () => {

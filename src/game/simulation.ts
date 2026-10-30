@@ -1,4 +1,5 @@
 import { GANTRY_LAYOUT, PLAYER_BODY } from './road-layout';
+import { BARRICADE_BODY } from './barricade-layout';
 
 export type GameStatus = 'menu' | 'playing' | 'paused' | 'crashed';
 export type PickupKind = 'bolt' | 'air' | 'shield' | 'magnet' | 'double' | 'rocket';
@@ -319,7 +320,11 @@ export class Simulation {
       const bounds =
         entity.kind === 'traffic'
           ? trafficBounds(entity.variant)
-          : { width: 3, height: 1.3, length: 0.7 };
+          : {
+              width: BARRICADE_BODY.width,
+              height: BARRICADE_BODY.height,
+              length: BARRICADE_BODY.depth,
+            };
       const top = entity.y + bounds.height;
       const width = (2.23 + bounds.width) / 2 - 0.28;
       const depth = (4.3 + bounds.length) / 2 - 0.45;
@@ -706,7 +711,7 @@ export class Simulation {
           : sky
             ? 7 + this.random() * 5
             : 0;
-      const kind = !sky && this.random() < 0.18 ? 'barrier' : 'traffic';
+      const kind = sky || this.random() < 0.18 ? 'barrier' : 'traffic';
       this.add(
         kind,
         lanes[i],
