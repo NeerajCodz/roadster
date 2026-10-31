@@ -305,7 +305,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) =>
   document.querySelector<T>(selector)!;
-const sim = new Simulation(Math.floor(Math.random() * 2147483647), prefs.runOptions);
+const sim = new Simulation(undefined, prefs.runOptions);
 const audio = new GameAudio();
 let scene: GameRenderer;
 try {

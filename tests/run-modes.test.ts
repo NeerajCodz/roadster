@@ -8,6 +8,7 @@ import {
 } from '../src/game/run-settings.ts';
 import { trafficBounds } from '../src/game/traffic-catalog.ts';
 import { PLAYER_BODY } from '../src/game/road-layout.ts';
+import { createCourseDriver } from './helpers/course-driver.ts';
 
 const roads = [
   { mode: 'normal', lanes: [-2, -1, 0, 1, 2], start: 0 },
@@ -240,13 +241,18 @@ test('difficulty profiles change actual driving, energy and progressive traffic/
     tick(game, 1, input(), true);
     const recharge = game.state.air;
     game.start();
-    game.state.invincible = 1000;
+    const drive = createCourseDriver(game.state.options);
     const trafficIds = new Set<number>(),
       hazardIds = new Set<number>();
     let population = 0,
       samples = 0;
     for (let frame = 0; frame < 30 * 60; frame++) {
-      game.update(1 / 60, input());
+      game.update(1 / 60, drive(game));
+      assert.equal(
+        game.state.status,
+        'playing',
+        `${difficulty}: density is measured during real driving`,
+      );
       for (const entity of game.state.entities) {
         if (entity.kind === 'traffic') trafficIds.add(entity.id);
         if (entity.kind === 'barrier') hazardIds.add(entity.id);

@@ -140,25 +140,23 @@ test('legacy ramps without kind remain straight and high-speed steps cannot skip
   assert.equal(game.state.roll, 0);
 });
 
-test('generated ramps cycle through all three kinds on narrow and wide roads and reset on retry', () => {
+test('generated ramps vary across seeds on narrow and wide roads and explicit seeds replay on retry', () => {
   for (const mode of ['normal', 'two-way', 'opposite'] as RoadModeId[]) {
     for (const laneCount of [mode === 'two-way' ? 2 : 1, 7]) {
-      const game = new Simulation(123, { mode, laneCount, difficulty: 'easy' });
-      game.start();
       const kinds = new Set<RampKind>();
-      for (let i = 0; i < 3600; i++) {
-        game.state.invincible = 100;
-        game.update(1 / 60, EMPTY_CONTROLS);
-        for (const entity of game.state.entities)
-          if (entity.kind === 'ramp') kinds.add(entity.rampKind!);
-        if (kinds.size === 3) break;
+      for (let seed = 0; seed < 24; seed++) {
+        const game = new Simulation(seed, { mode, laneCount, difficulty: 'easy' });
+        game.start();
+        const ramp = game.state.entities.find((entity) => entity.kind === 'ramp')!;
+        kinds.add(ramp.rampKind!);
+        const initial = { ...ramp };
+        game.start();
+        assert.deepEqual(
+          game.state.entities.find((entity) => entity.kind === 'ramp'),
+          initial,
+        );
       }
-      assert.deepEqual([...kinds], [...RAMP_KINDS], `${mode}/${laneCount}`);
-      game.start();
-      assert.equal(
-        game.state.entities.find((entity) => entity.kind === 'ramp')?.rampKind,
-        'straight',
-      );
+      assert.deepEqual([...kinds].sort(), [...RAMP_KINDS].sort(), `${mode}/${laneCount}`);
     }
   }
 });
