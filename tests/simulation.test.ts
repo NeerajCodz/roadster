@@ -315,9 +315,9 @@ test('a close pass awards one near miss and combo expires without another', () =
 
 test('a ramp automatically hops a grounded car without spending air', () => {
   const game = playing();
-  game.state.entities = [obstacle({ kind: 'ramp', z: -1 })];
+  game.state.entities = [obstacle({ kind: 'ramp', z: -4.1 })];
   game.update(1 / 60, controls());
-  advance(game, 0.2);
+  advance(game, 0.3, controls(), false);
   assert.ok(game.state.y > 1);
   assert.equal(game.state.air, 100);
 });

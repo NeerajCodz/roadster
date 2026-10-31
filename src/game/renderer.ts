@@ -22,6 +22,9 @@ import {
   ROAD_MARKING_PERIOD,
 } from './road-geometry';
 import { animateBarricade, createBarricade } from './barricade';
+import { animateLaunchRamp, createLaunchRamp } from './ramp';
+import { normalizeRampKind } from './ramp-layout';
+import { rollVisualAngle } from './ramp-presentation';
 import { TRAFFIC_CATALOG, TRAFFIC_PAINTS, trafficSpec } from './traffic-catalog';
 import { animateTrafficVehicle, createTrafficVehicle } from './traffic-model';
 import {
@@ -459,13 +462,14 @@ export class GameRenderer {
     if (this.scene.fog instanceof THREE.Fog)
       this.scene.fog.color.copy(this.fogDay).lerp(this.fogNight, night);
     updatePlayerPosition(this.player.position, state, dt);
-    const rollAngle =
-      state.roll > 0 ? state.rollDirection * (1 - state.roll / 0.65) * Math.PI * 2 : 0;
+    const rollAngle = rollVisualAngle(state.rollDirection, state.roll, state.rollDuration);
     const lean = menu
       ? 0
       : THREE.MathUtils.clamp((state.lane * LANE_WIDTH - state.x) * -0.065, -0.18, 0.18);
-    this.player.rotation.z = rollAngle + lean;
-    this.player.rotation.x = menu ? 0 : THREE.MathUtils.clamp(-state.vy * 0.014, -0.12, 0.2);
+    this.player.rotation.z = rollAngle + lean + (menu ? 0 : state.rampBank);
+    this.player.rotation.x = menu
+      ? 0
+      : state.rampPitch + THREE.MathUtils.clamp(-state.vy * 0.014, -0.12, 0.2);
     if (menu) {
       // Drag to spin the car; it coasts, then the garage turntable takes over.
       if (!this.menuDragging) {
@@ -1043,7 +1047,9 @@ export class GameRenderer {
           ? `traffic:${variant}:${appearance}`
           : entity.kind === 'barrier'
             ? `barrier:${entity.y > 0 ? 'flying' : 'ground'}`
-            : `${entity.kind}:${entity.pickup ?? ''}`;
+            : entity.kind === 'ramp'
+              ? `ramp:${normalizeRampKind(entity.rampKind)}`
+              : `${entity.kind}:${entity.pickup ?? ''}`;
       let group = this.entityMeshes.get(entity.id);
       if (group && group.userData.entityKey !== key) {
         this.releaseEntity(group);
@@ -1081,6 +1087,7 @@ export class GameRenderer {
         group.rotation.y += dt * 1.6;
       }
       if (entity.kind === 'barrier') animateBarricade(group, time + entity.id * 0.21);
+      if (entity.kind === 'ramp') animateLaunchRamp(group, time);
     }
   }
 
@@ -1144,14 +1151,7 @@ export class GameRenderer {
   private makePickup(entity: Entity) {
     const group = new THREE.Group();
     if (entity.kind === 'ramp') {
-      const ramp = new THREE.Mesh(
-        new THREE.BoxGeometry(2.8, 0.25, 6),
-        new THREE.MeshStandardMaterial({ color: '#cadf69', metalness: 0.5, roughness: 0.45 }),
-      );
-      ramp.rotation.x = -0.19;
-      ramp.position.y = 0.45;
-      group.add(ramp);
-      return group;
+      return createLaunchRamp(normalizeRampKind(entity.rampKind));
     }
     if (entity.kind === 'barrier') {
       return createBarricade(entity.y > 0);

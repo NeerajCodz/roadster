@@ -1,5 +1,12 @@
 import { gantryFor, PLAYER_BODY } from './road-layout';
 import { BARRICADE_BODY } from './barricade-layout';
+import {
+  normalizeRampKind,
+  RAMP_KINDS,
+  RAMP_LAYOUT,
+  sampleRamp,
+  type RampKind,
+} from './ramp-layout';
 import { TRAFFIC_CATALOG, TRAFFIC_PAINTS, trafficBounds, trafficSpec } from './traffic-catalog';
 import {
   DEFAULT_RUN_OPTIONS,
@@ -30,6 +37,7 @@ export interface Entity {
   appearance?: number;
   speed?: number;
   direction?: 1 | -1;
+  rampKind?: RampKind;
 }
 export interface GameEvent {
   type: string;
@@ -50,6 +58,9 @@ export interface GameState {
   air: number;
   roll: number;
   rollDirection: number;
+  rollDuration: number;
+  rampBank: number;
+  rampPitch: number;
   rollCooldown: number;
   boosting: boolean;
   combo: number;
@@ -100,6 +111,9 @@ const freshState = (
   air: 100,
   roll: 0,
   rollDirection: 1,
+  rollDuration: 0.65,
+  rampBank: 0,
+  rampPitch: 0,
   rollCooldown: 0,
   boosting: false,
   combo: 1,
@@ -145,6 +159,9 @@ export class Simulation {
   private previous: Controls = { ...EMPTY_CONTROLS };
   private flightExhausted = false;
   private roofId: number | null = null;
+  private rampId: number | null = null;
+  private pendingRampRoll: { id: number; direction: -1 | 1 } | null = null;
+  private rampSequence = 0;
   private riddenRoofs = new Set<number>();
   private motions = new Map<number, TrafficMotion>();
   private nextMilestone = 1000;
@@ -194,6 +211,9 @@ export class Simulation {
     this.previous = { ...EMPTY_CONTROLS };
     this.flightExhausted = false;
     this.roofId = null;
+    this.rampId = null;
+    this.pendingRampRoll = null;
+    this.rampSequence = 0;
     this.riddenRoofs.clear();
     const start = this.road.startLane;
     for (let i = 0; i < 5; i++) this.add('pickup', start, -38 - i * 13, 1.15, 'bolt');
@@ -224,6 +244,9 @@ export class Simulation {
     this.previous = { ...EMPTY_CONTROLS };
     this.flightExhausted = false;
     this.roofId = null;
+    this.rampId = null;
+    this.pendingRampRoll = null;
+    this.rampSequence = 0;
     this.riddenRoofs.clear();
     this.motions.clear();
     this.airborneTime = 0;
@@ -233,9 +256,10 @@ export class Simulation {
 
   getRollReadiness(): 'grounded' | 'low-air' | 'cooldown' | 'ready' {
     const s = this.state;
+    if (this.rampId !== null) return 'grounded';
     if (s.y - this.roofFloor() < ROLL_CLEARANCE) return 'grounded';
     if (s.air < 8) return 'low-air';
-    return s.rollCooldown > 0 ? 'cooldown' : 'ready';
+    return s.rollCooldown > 0 || this.pendingRampRoll ? 'cooldown' : 'ready';
   }
 
   update(dt: number, controls: Controls): void {
@@ -263,6 +287,7 @@ export class Simulation {
       this.getRollReadiness() === 'ready'
     ) {
       s.roll = ROLL_DURATION;
+      s.rollDuration = ROLL_DURATION;
       s.rollDirection = rollLeft ? -1 : 1;
       s.rollCooldown = 1.7;
       s.invincible = Math.max(s.invincible, 0.72);
@@ -329,6 +354,10 @@ export class Simulation {
     s.x = approach(s.x, s.lane * LANE_WIDTH, 11, dt);
     const previousY = s.y;
     this.moveVertically(dt, controls, this.roofFloor());
+    if (this.rampId === null) {
+      s.rampBank = approach(s.rampBank, 0, 8, dt);
+      s.rampPitch = approach(s.rampPitch, 0, 8, dt);
+    }
     this.collideGantries(previousDistance, previousX, previousY);
     if (s.status !== 'playing') return;
 
@@ -356,12 +385,7 @@ export class Simulation {
         continue;
       }
       if (entity.kind === 'ramp') {
-        if (!entity.passed && dx < 1.5 && s.y < 0.55 && oldZ < 2 && entity.z > -2) {
-          entity.passed = true;
-          s.y = 0.03;
-          s.vy = 11;
-          s.events.push({ type: 'hop', label: 'LIFT OFF' });
-        }
+        this.rideRamp(entity, oldZ, previousX, previousY, controls);
         continue;
       }
       const bounds =
@@ -426,6 +450,7 @@ export class Simulation {
         }
       }
     }
+    this.launchRampRoll();
     s.entities = s.entities.filter(
       (entity) => entity.z < 36 && !(entity.kind === 'pickup' && entity.passed),
     );
@@ -712,6 +737,11 @@ export class Simulation {
   }
 
   private roofFloor(): number {
+    if (this.rampId !== null) {
+      const ramp = this.state.entities.find((entity) => entity.id === this.rampId);
+      if (ramp && !ramp.passed) return this.rampSurface(ramp).y;
+      this.rampId = null;
+    }
     if (this.roofId === null) return 0;
     const s = this.state;
     const roof = s.entities.find((entity) => entity.id === this.roofId);
@@ -728,6 +758,90 @@ export class Simulation {
     }
     this.roofId = null;
     return 0;
+  }
+
+  private rampSurface(ramp: Entity, z = ramp.z, x = this.state.x) {
+    const kind = normalizeRampKind(ramp.rampKind);
+    const t = (RAMP_LAYOUT.length / 2 + z) / RAMP_LAYOUT.length;
+    const centre = sampleRamp(kind, t);
+    const lateral = (x - ramp.x) / ((RAMP_LAYOUT.width / 2) * Math.cos(centre.bank));
+    return { ...sampleRamp(kind, t, lateral), lateral };
+  }
+
+  private rideRamp(
+    ramp: Entity,
+    oldZ: number,
+    previousX: number,
+    previousY: number,
+    controls: Controls,
+  ): void {
+    const s = this.state,
+      half = RAMP_LAYOUT.length / 2;
+    const surface = this.rampSurface(ramp);
+    const poweredFlight =
+      (controls.fly && !controls.dive && s.air > 0 && !this.flightExhausted) || s.rocket > 0;
+    if (this.rampId === ramp.id && (Math.abs(surface.lateral) > 0.88 || poweredFlight)) {
+      this.rampId = null;
+      this.pendingRampRoll = null;
+      ramp.passed = true;
+      return;
+    }
+    if (ramp.passed || ramp.z < -half || oldZ > half) return;
+    if (this.rampId !== ramp.id) {
+      const oldSurface = this.rampSurface(ramp, oldZ, previousX);
+      const enteringToe = oldZ <= -half;
+      const crossingDeck = previousY >= oldSurface.y - 0.035;
+      const touchingDeck = Math.abs(s.y - surface.y) <= 0.08;
+      // Contact at the toe, or a car descending onto a deck; airborne passes stay clear.
+      if (
+        this.rampId !== null ||
+        poweredFlight ||
+        Math.abs(surface.lateral) > 0.88 ||
+        s.vy > 0.1 ||
+        s.y > surface.y + 0.12 ||
+        (!enteringToe && !crossingDeck && !touchingDeck)
+      )
+        return;
+      this.rampId = ramp.id;
+      this.roofId = null;
+    }
+    s.y = surface.y;
+    s.vy = 0;
+    s.rampBank = surface.bank;
+    s.rampPitch = surface.pitch;
+    if (ramp.z >= half) {
+      const kind = normalizeRampKind(ramp.rampKind);
+      s.vy = kind === 'straight' ? RAMP_LAYOUT.launchSpeed : RAMP_LAYOUT.rollLaunchSpeed;
+      this.rampId = null;
+      ramp.passed = true;
+      s.events.push({
+        type: 'hop',
+        label: kind === 'straight' ? 'STRAIGHT LAUNCH' : 'ROLL LAUNCH',
+      });
+      if (kind !== 'straight') {
+        this.pendingRampRoll = { id: ramp.id, direction: kind === 'roll-left' ? -1 : 1 };
+        s.rollCooldown = Math.max(s.rollCooldown, 1.7);
+      }
+    }
+  }
+
+  private launchRampRoll(): void {
+    const pending = this.pendingRampRoll;
+    if (!pending) return;
+    const s = this.state;
+    if (s.y <= 0 || s.roll > 0 || s.status !== 'playing') {
+      this.pendingRampRoll = null;
+      return;
+    }
+    const ramp = s.entities.find((entity) => entity.id === pending.id);
+    if (ramp && ramp.z <= RAMP_LAYOUT.length / 2 + PLAYER_BODY.length / 2) return;
+    if (s.y - this.roofFloor() < ROLL_CLEARANCE) return;
+    this.pendingRampRoll = null;
+    s.rollDirection = pending.direction;
+    s.rollDuration = RAMP_LAYOUT.rollDuration;
+    s.roll = s.rollDuration;
+    s.invincible = Math.max(s.invincible, s.rollDuration + 0.05);
+    this.trick('roll', pending.direction === -1 ? 'LEFT BARREL ROLL' : 'RIGHT BARREL ROLL', 100);
   }
 
   private moveVertically(dt: number, controls: Controls, floor = 0): void {
@@ -911,7 +1025,7 @@ export class Simulation {
         other.kind === 'traffic'
           ? trafficBounds(other.variant).length
           : other.kind === 'ramp'
-            ? 6
+            ? RAMP_LAYOUT.length
             : other.kind === 'barrier'
               ? BARRICADE_BODY.depth
               : 0;
@@ -1023,6 +1137,7 @@ export class Simulation {
       z,
       variant,
     };
+    if (kind === 'ramp') entity.rampKind = RAMP_KINDS[this.rampSequence++ % RAMP_KINDS.length];
     if (kind === 'traffic') {
       entity.direction = directionForLane(this.state.options.mode, lane);
       entity.speed = trafficSpec(variant).cruiseSpeed * this.rules.trafficSpeed;
