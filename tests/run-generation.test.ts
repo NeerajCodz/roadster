@@ -154,7 +154,7 @@ test('randomized gaps stay inside the requested floor and proportional bounds', 
     [0, 12],
   ]) {
     const low = Math.max(minimum, base * 0.85),
-      high = Math.max(minimum, base * 1.25);
+      high = Math.max(minimum, base) * 1.25;
     assert.equal(
       randomGap(base, minimum, () => 0),
       low,
@@ -169,6 +169,14 @@ test('randomized gaps stay inside the requested floor and proportional bounds', 
       assert.ok(gap >= low && gap <= high);
     }
   }
+});
+
+test('late-run encounter timing remains random after the difficulty gap reaches its minimum', async () => {
+  const { randomGap } = await generator();
+  const random = randomFor(24);
+  const gaps = Array.from({ length: 40 }, () => randomGap(-100, 55, random));
+  assert.ok(new Set(gaps).size > 30);
+  assert.ok(gaps.every((gap) => gap >= 55 && gap <= 68.75));
 });
 
 test('shuffled bags cover every item once per draw cycle and preserve the input', async () => {

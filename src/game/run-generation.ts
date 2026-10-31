@@ -12,7 +12,7 @@ export interface SpawnSpec {
 /** Vary encounter timing without shortening the caller's minimum reaction gap. */
 export function randomGap(base: number, minimum: number, random: () => number): number {
   const low = Math.max(minimum, base * 0.85);
-  const high = Math.max(minimum, base * 1.25);
+  const high = Math.max(minimum, base) * 1.25;
   return low + (high - low) * random();
 }
 
