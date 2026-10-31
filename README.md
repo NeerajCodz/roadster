@@ -37,6 +37,12 @@ Use `npm ci` instead of `npm install` for a reproducible install from the lockfi
 
 Choose **LET'S DRIVE** (or press Enter/Space in the showroom) to open run setup, pick a road, total lane count and difficulty, then choose **START RUN**. The garage's Drive button opens the same setup. Your selection is remembered. Retry and restart keep the current setup; return to the showroom to change it.
 
+Every start, retry and restart generates a fresh random course. Opening pickup trails, ramp lanes and distances, ramp order, encounter timing, NPC models/paint and hazard formations vary. Ramp kinds come from shuffled bags, so all three appear without a fixed repeating order. The selected road width and difficulty stay the same.
+
+Placements are checked against reachable routes using real body dimensions, oncoming closing speeds, possible NPC braking and lane-change reservations. A gap must allow reaction time and a complete steering maneuver. Single-lane encounters reserve flight and air-recharge time, with refills before ground obstacles. Ramp takeoff and landing windows also remain clear of new bodies and NPC lane changes. The checks preserve a playable route while collisions and energy management remain active.
+
+For debugging, `new Simulation(seed, options)` reproduces a course and its retries; normal play uses `new Simulation(undefined, options)` for fresh seeds. The active seed is available as `simulation.state.seed`. The contact-time equation and route graph are implemented in `src/game/route-planner.ts`; the opening arrangements and shuffle bags are in `src/game/run-generation.ts`.
+
 | Road mode | Lanes | Traffic |
 | --- | --- | --- |
 | Normal | 1–7 | All vehicles travel in your direction. |
@@ -59,7 +65,7 @@ Each of the 60 road/lane-count/difficulty combinations keeps its own score, dist
 
 The car cruises automatically. Keep a clear lane or fly over obstacles; releasing flight lets the car descend. Air refills on the ground. Barrel rolls work only while airborne: take off first, then press Q / E. They consume air, move one lane, and provide brief collision protection. Landing on the road or a traffic roof immediately ends the spin. Ramps launch the car, and a controlled landing can ride a traffic vehicle's roof. Near misses increase a temporary combo multiplier. NPC cars stay on the road; watch for flying barricades as the run progresses.
 
-Three Volt launch ramps cycle through the run: **Straight**, **Left Roll**, and **Right Roll**. The car follows each curved deck's pitch and bank before leaving the lip. Roll ramps perform one free barrel roll in the indicated direction after the rear bumper clears the ramp, holding your current lane. Q / E stays blocked on the deck. Flying early or steering off skips the automatic ramp trick. The ramps use charcoal metal, titanium trusses, grip ribs, fixings, lime edge lighting and animated light pulses.
+Three Volt launch ramps appear in shuffled order: **Straight**, **Left Roll**, and **Right Roll**. The car follows each curved deck's pitch and bank before leaving the lip. Roll ramps perform one free barrel roll in the indicated direction after the rear bumper clears the ramp, holding your current lane. Q / E stays blocked on the deck. Flying early or steering off skips the automatic ramp trick. The ramps use charcoal metal, titanium trusses, grip ribs, fixings, lime edge lighting and animated light pulses.
 
 Open the [Volt ramp inspector](http://127.0.0.1:5173/tools/ramps/index.html) with the development server running to compare entry, side and launch views of the three models. Type-check it with `node node_modules/typescript/bin/tsc -p tools/ramps/tsconfig.json`.
 
@@ -107,6 +113,8 @@ To inspect both props side by side, start the development server and open [`/too
 | `src/main.ts`                                  | Interface, keyboard and pointer input, dialogs, saved preferences, HUD, music and voice playback     |
 | `src/game/simulation.ts`                       | Seeded, renderer-independent game state, movement, flight, traffic, collisions, scoring, and pickups |
 | `src/game/run-settings.ts`                    | Shared immutable road modes and real difficulty profiles                                             |
+| `src/game/run-random.ts`, `run-generation.ts`  | Fresh run seeds, reproducible randomness, varied opening layouts and shuffle bags                    |
+| `src/game/route-planner.ts`                    | Physical contact-time envelopes, connected steering routes and flight/recharge spacing              |
 | `src/game/run-records.ts`                     | Validated records for nine run setups and legacy record migration                                    |
 | `src/game/road-layout.ts`, `road-geometry.ts`  | Shared mode-dependent lane markings, road dimensions, gantries and oncoming presentation              |
 | `src/game/renderer.ts`                         | Three.js scene, model loading, freeway and scenery, lighting, effects, camera, and graphics quality  |
