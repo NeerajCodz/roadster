@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Roaster Sim — Volt launch ramps</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #141c18;
+        color: #e7eddf;
+        font:
+          13px system-ui,
+          sans-serif;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      header {
+        position: absolute;
+        top: 30px;
+        left: 4%;
+        right: 4%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid #ffffff24;
+        padding-bottom: 18px;
+      }
+      strong {
+        letter-spacing: 4px;
+      }
+      header span {
+        color: #dcf569;
+        letter-spacing: 2px;
+        font-size: 10px;
+      }
+      nav {
+        position: absolute;
+        top: 94px;
+        left: 4%;
+        display: flex;
+        gap: 8px;
+      }
+      button {
+        background: #202b23;
+        border: 1px solid #ffffff35;
+        border-radius: 5px;
+        color: #dce5d2;
+        padding: 8px 16px;
+        cursor: pointer;
+      }
+      button[aria-pressed='true'] {
+        color: #182015;
+        background: #dcf569;
+        border-color: #dcf569;
+      }
+      footer {
+        position: absolute;
+        bottom: 30px;
+        left: 0;
+        right: 0;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0;
+      }
+      section {
+        margin: 0 12%;
+        border-top: 1px solid #ffffff30;
+        padding-top: 16px;
+      }
+      .label {
+        font-size: 10px;
+        color: #dcf569;
+        letter-spacing: 3px;
+      }
+      h1 {
+        font-size: 24px;
+        font-weight: 500;
+        letter-spacing: 1px;
+        margin: 8px 0;
+      }
+      p {
+        font-size: 11px;
+        line-height: 1.8;
+        color: #aebca6;
+        margin: 0;
+      }
+      @media (max-width: 650px) {
+        header span {
+          display: none;
+        }
+        h1 {
+          font-size: 14px;
+        }
+        p {
+          font-size: 9px;
+        }
+        section {
+          margin: 0 8%;
+        }
+        nav {
+          top: 85px;
+        }
+        button {
+          padding: 6px 10px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header><strong>ROASTER SIM</strong><span>VOLT / LAUNCH SYSTEM 03</span></header>
+    <nav aria-label="Ramp camera">
+      <button aria-pressed="true" data-view="entry">Entry view</button
+      ><button aria-pressed="false" data-view="side">Side profile</button
+      ><button aria-pressed="false" data-view="lip">Launch view</button>
+    </nav>
+    <canvas
+      aria-label="Three sculpted Volt launch ramps with curved decks and structural frames"
+    ></canvas>
+    <footer>
+      <section>
+        <span class="label">01 / LIFT</span>
+        <h1>STRAIGHT</h1>
+        <p>Concave deck · clean vertical launch</p>
+      </section>
+      <section>
+        <span class="label">02 / ROTATE LEFT</span>
+        <h1>LEFT ROLL</h1>
+        <p>Progressive bank · left barrel roll</p>
+      </section>
+      <section>
+        <span class="label">03 / ROTATE RIGHT</span>
+        <h1>RIGHT ROLL</h1>
+        <p>Mirrored bank · right barrel roll</p>
+      </section>
+    </footer>
+    <script type="module" src="./viewer.ts"></script>
+  </body>
+</html>

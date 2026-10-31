@@ -59,6 +59,10 @@ Each of the 60 road/lane-count/difficulty combinations keeps its own score, dist
 
 The car cruises automatically. Keep a clear lane or fly over obstacles; releasing flight lets the car descend. Air refills on the ground. Barrel rolls work only while airborne: take off first, then press Q / E. They consume air, move one lane, and provide brief collision protection. Landing on the road or a traffic roof immediately ends the spin. Ramps launch the car, and a controlled landing can ride a traffic vehicle's roof. Near misses increase a temporary combo multiplier. NPC cars stay on the road; watch for flying barricades as the run progresses.
 
+Three Volt launch ramps cycle through the run: **Straight**, **Left Roll**, and **Right Roll**. The car follows each curved deck's pitch and bank before leaving the lip. Roll ramps perform one free barrel roll in the indicated direction after the rear bumper clears the ramp, holding your current lane. Q / E stays blocked on the deck. Flying early or steering off skips the automatic ramp trick. The ramps use charcoal metal, titanium trusses, grip ribs, fixings, lime edge lighting and animated light pulses.
+
+Open the [Volt ramp inspector](http://127.0.0.1:5173/tools/ramps/index.html) with the development server running to compare entry, side and launch views of the three models. Type-check it with `node node_modules/typescript/bin/tsc -p tools/ramps/tsconfig.json`.
+
 | Action         | Desktop                                 | Touch                 |
 | -------------- | --------------------------------------- | --------------------- |
 | Start / retry  | Enter or Space, or the on-screen button | Start / retry button  |
